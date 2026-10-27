@@ -6,8 +6,8 @@ from datetime import date
 from pathlib import Path
 
 from .config import Project, read_basis_raw
-from .extract import (file_sha256, humanize, page_hash, pdf_title, read_pdf_pages,
-                      strip_rev_suffix)
+from .extract import (file_sha256, humanize, ocr_available, ocr_missing_text, page_hash, pdf_title,
+                      read_pdf_pages, strip_rev_suffix)
 from .store import Issue, Store
 
 
@@ -70,6 +70,8 @@ def ingest(project: Project, store: Store, label: str, note: str = "",
             sha = file_sha256(f)
             try:
                 pages = read_pdf_pages(f)
+                if not all(t.strip() for t in pages):
+                    pages = ocr_missing_text(f, pages)
             except Exception as e:  # corrupt / encrypted PDF
                 result.warnings.append(f"{key}: could not read PDF ({e}); skipped")
                 continue
@@ -79,6 +81,7 @@ def ingest(project: Project, store: Store, label: str, note: str = "",
             result.documents += 1
             result.pages += len(pages)
             if not any(t.strip() for t in pages):
-                result.warnings.append(f"{key}: no text layer — OCR it so it can be checked")
+                result.warnings.append(f"{key}: no readable text" + (
+                    "" if ocr_available() else " — install Tesseract to read scanned hand calcs"))
     store.commit()
     return result

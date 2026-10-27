@@ -10,18 +10,41 @@ from .rules import RuleSet, parse_code_name
 from .units import fmt, parse_quantity
 
 
+PHASES = ["Planning", "Schematic Design", "Design Development", "Construction Documents",
+          "Permitting", "Bidding", "Construction", "Closeout"]
+SIGN_ROLES = [("prepared_by", "Prepared by"), ("checked_by", "Checked by"), ("approved_by", "Approved by")]
+
+
 @dataclass
 class Package:
+    """A section of the report package, backed by a folder of PDFs."""
     id: str
     title: str
     path: Path
     discipline: str = ""
     responsible: str = ""
     kind: str = "calcs"            # "calcs" | "drawings"
+    include: bool = True           # include this section in the compiled book
+    title_page: bool = True        # insert a section title page before it
+    order: list[str] = field(default_factory=list)   # document order (doc names without rev suffix)
 
     @property
     def is_drawings(self) -> bool:
         return self.kind == "drawings"
+
+    def rank(self, name: str) -> tuple:
+        """Sort key for a document name within this section: explicit order first,
+        anything not yet placed after it, alphabetically."""
+        low = name.lower()
+        order = [o.lower() for o in self.order]
+        return (order.index(low), "") if low in order else (len(order), low)
+
+
+@dataclass
+class Milestone:
+    name: str
+    due: str = ""
+    done: bool = False
 
 
 @dataclass
@@ -35,6 +58,10 @@ class Project:
     basis_path: Path
     rules_path: Path | None
     output_dir: Path
+    address: str = ""
+    phase: str = "Design Development"
+    milestones: list[Milestone] = field(default_factory=list)
+    signatures: dict[str, dict] = field(default_factory=dict)   # role -> {name, date}
 
     @property
     def package_ids(self) -> list[str]:
@@ -51,6 +78,11 @@ class Project:
     def package(self, pid: str) -> Package | None:
         return next((p for p in self.packages if p.id == pid), None)
 
+    @property
+    def book_sections(self) -> list[Package]:
+        """Calculation sections that go into the compiled book, in order."""
+        return [p for p in self.packages if not p.is_drawings and p.include]
+
 
 def load_project(path: str | Path) -> Project:
     path = Path(path).resolve()
@@ -58,9 +90,9 @@ def load_project(path: str | Path) -> Project:
         raise FileNotFoundError(f"{path} not found — run `calcbook init` first or pass -p")
     data = yaml.safe_load(path.read_text()) or {}
     root = path.parent
-    proj = data.get("project", {})
+    proj = data.get("project", {}) or {}
     pkgs = []
-    for p in data.get("packages", []):
+    for p in data.get("packages", []) or []:
         if "id" not in p or "path" not in p:
             raise ValueError("each package needs an `id` and a `path`")
         pkgs.append(Package(
@@ -70,21 +102,40 @@ def load_project(path: str | Path) -> Project:
             discipline=p.get("discipline", ""),
             responsible=p.get("responsible", ""),
             kind=str(p.get("kind", "calcs")).lower(),
+            include=bool(p.get("include", True)),
+            title_page=bool(p.get("title_page", True)),
+            order=[str(o) for o in (p.get("order") or [])],
         ))
     if len({p.id for p in pkgs}) != len(pkgs):
         raise ValueError("package ids must be unique")
     rules = data.get("rules")
+    ms = [Milestone(str(m.get("name", "")), str(m.get("due", "") or ""), bool(m.get("done", False)))
+          for m in (proj.get("milestones") or []) if isinstance(m, dict)]
     return Project(
         root=root,
         name=proj.get("name", "Untitled project"),
-        number=str(proj.get("number", "")),
-        engineer_of_record=proj.get("engineer_of_record", ""),
-        client=proj.get("client", ""),
+        number=str(proj.get("number", "") or ""),
+        engineer_of_record=proj.get("engineer_of_record", "") or "",
+        client=proj.get("client", "") or "",
         packages=pkgs,
         basis_path=(root / data.get("basis", "design_basis.yaml")).resolve(),
         rules_path=(root / rules).resolve() if rules else None,
         output_dir=(root / data.get("output", "output")).resolve(),
+        address=proj.get("address", "") or "",
+        phase=proj.get("phase", "Design Development") or "Design Development",
+        milestones=ms,
+        signatures={k: dict(v) for k, v in (proj.get("signatures") or {}).items() if isinstance(v, dict)},
     )
+
+
+def edit_project(path: Path, fn) -> None:
+    """Load project.yaml as a dict, let fn modify it in place, write it back."""
+    path = Path(path)
+    data = yaml.safe_load(path.read_text()) or {}
+    data.setdefault("project", {})
+    data.setdefault("packages", [])
+    fn(data)
+    path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
 
 
 def read_basis_raw(project: Project) -> dict:

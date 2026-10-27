@@ -126,5 +126,8 @@ class Workspace:
     def ordered_documents(self, issue: Issue) -> list[DocRecord]:
         """Documents in manifest package order, then file order."""
         order = {pid: i for i, pid in enumerate(self.project.package_ids)}
-        return sorted(self.store.documents(issue),
-                      key=lambda d: (order.get(d.package, 999), d.rel_path.lower()))
+
+        def key(d):
+            pkg = self.project.package(d.package)
+            return (order.get(d.package, 999), pkg.rank(d.name) if pkg else (0, d.name.lower()))
+        return sorted(self.store.documents(issue), key=key)

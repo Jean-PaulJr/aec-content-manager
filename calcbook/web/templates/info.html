@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+{% set p = g.ws.project %}
+<div class="top"><div><h1>Project info</h1><div class="sub">Details that print on the calc book cover, the current phase and milestones.</div></div></div>
+<form method="post" class="grid" style="gap:14px">
+  <div class="card pad grid" style="gap:12px">
+    <h3>Details</h3>
+    <div class="grid g4">
+      <label class="field">Project name<input type="text" name="name" id="pi-name" value="{{ p.name }}" required></label>
+      <label class="field">Project number<input type="text" name="number" id="pi-number" value="{{ p.number }}"></label>
+      <label class="field">Client<input type="text" name="client" id="pi-client" value="{{ p.client }}"></label>
+      <label class="field">Address<input type="text" name="address" id="pi-address" value="{{ p.address }}"></label>
+      <label class="field">Engineer of record<input type="text" name="engineer_of_record" id="pi-eor" value="{{ p.engineer_of_record }}"></label>
+      <label class="field">Phase<select class="in" name="phase" id="pi-phase">{% for ph in PHASES %}<option {{ 'selected' if ph == p.phase }}>{{ ph }}</option>{% endfor %}</select></label>
+    </div>
+  </div>
+  <div class="card">
+    <div class="pad"><h3>Milestones</h3><div class="muted small">Leave a name blank to remove that row.</div></div>
+    <div class="scroll"><table id="ms">
+      <thead><tr><th>Done</th><th>Milestone</th><th>Due</th></tr></thead><tbody>
+      {% for m in p.milestones %}<tr>
+        <td><input type="checkbox" name="ms_done" value="{{ loop.index0 }}" {{ 'checked' if m.done }} aria-label="Done"></td>
+        <td><input type="text" name="ms_name" value="{{ m.name }}" style="width:100%"></td>
+        <td><input type="date" name="ms_due" value="{{ m.due }}"></td></tr>{% endfor %}
+      {% for i in range(3) %}<tr>
+        <td><input type="checkbox" name="ms_done" value="{{ p.milestones|length + i }}" aria-label="Done"></td>
+        <td><input type="text" name="ms_name" placeholder="New milestone" style="width:100%"></td>
+        <td><input type="date" name="ms_due"></td></tr>{% endfor %}
+      </tbody></table></div>
+  </div>
+  <div class="row"><span class="spacer"></span><button class="btn primary">Save project info</button></div>
+</form>
+{% endblock %}

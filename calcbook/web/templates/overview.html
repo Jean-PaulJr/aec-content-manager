@@ -1,45 +1,66 @@
 {% extends "base.html" %}
 {% block content %}
+{% set p = g.ws.project %}
 <div class="top">
-  <div><h1>{{ g.ws.project.name }}</h1>
-    <div class="sub">{% if g.ws.project.number %}{{ g.ws.project.number }} · {% endif %}{{ g.ws.project.client }}{% if g.ws.project.engineer_of_record %} · EOR {{ g.ws.project.engineer_of_record }}{% endif %}</div></div>
+  <div><h1>{{ p.name }}</h1>
+    <div class="sub">{% if p.number %}{{ p.number }} · {% endif %}{{ p.client }}{% if p.address %} · {{ p.address }}{% endif %}{% if p.engineer_of_record %} · EOR {{ p.engineer_of_record }}{% endif %}</div></div>
   <div class="row">
-    <a class="btn" href="{{ url_for('documents', slug=g.slug) }}">Upload documents</a>
-    {% if latest %}<a class="btn primary" href="{{ url_for('download_book', slug=g.slug) }}">Download calc book (Issue {{ latest.label }})</a>{% endif %}
+    <a class="btn" href="{{ url_for('documents', slug=g.slug) }}">Report package</a>
+    {% if latest %}<a class="btn primary" href="{{ url_for('download_book', slug=g.slug) }}">Calc book · Issue {{ latest.label }}</a>{% endif %}
   </div>
 </div>
 
-{% if not latest %}
-<div class="card empty">No issues yet. Upload each sub-package's PDFs, then record Issue A.
-  <div style="margin-top:12px"><a class="btn primary" href="{{ url_for('documents', slug=g.slug) }}">Upload documents</a></div></div>
-{% else %}
+<div class="card pad" style="margin-bottom:14px">
+  <div class="row" style="margin-bottom:10px"><h3>Phase</h3><span class="muted small">{{ p.phase }}</span><span class="spacer"></span>
+    <a class="small" href="{{ url_for('info', slug=g.slug) }}">Edit project info →</a></div>
+  {% set cur = PHASES.index(p.phase) if p.phase in PHASES else 0 %}
+  <div class="phases">{% for ph in PHASES %}<div class="phase {{ 'cur' if loop.index0 == cur else ('done' if loop.index0 < cur) }}">{{ ph }}</div>{% endfor %}</div>
+</div>
+
 <div class="grid g4">
-  <a class="card pad stat err" href="{{ url_for('findings', slug=g.slug) }}"><b>{{ c.error }}</b><span>errors in Issue {{ latest.label }}</span></a>
-  <a class="card pad stat warn" href="{{ url_for('findings', slug=g.slug) }}"><b>{{ c.warning }}</b><span>warnings</span></a>
-  <div class="card pad stat info"><b>{{ c.info }}</b><span>notes</span></div>
-  {% if diff %}<a class="card pad stat" href="{{ url_for('changes', slug=g.slug) }}"><b>{{ diff.summary.revised + diff.summary.new }}</b><span>documents changed since {{ diff.old.label }}</span></a>{% endif %}
+  <a class="card pad stat err" href="{{ url_for('findings', slug=g.slug) }}"><b>{{ c.error if c else '—' }}</b><span>design-intent errors{% if latest %} · Issue {{ latest.label }}{% endif %}</span></a>
+  <a class="card pad stat" href="{{ url_for('qa', slug=g.slug) }}"><b>{{ stats.qa_approved }}/{{ stats.qa_total }}</b><span>calcs approved in QA</span></a>
+  <a class="card pad stat {{ 'err' if stats.rfi_overdue }}" href="{{ url_for('rfis', slug=g.slug) }}"><b>{{ stats.rfi_open }}</b><span>open RFIs{% if stats.rfi_overdue %} · {{ stats.rfi_overdue }} overdue{% endif %}</span></a>
+  <a class="card pad stat {{ 'err' if stats.sub_overdue }}" href="{{ url_for('submittals', slug=g.slug) }}"><b>{{ stats.sub_open }}</b><span>submittals in review{% if stats.sub_overdue %} · {{ stats.sub_overdue }} overdue{% endif %}</span></a>
   <a class="card pad stat" href="{{ url_for('documents', slug=g.slug) }}"><b>{{ pending }}</b><span>uploads not yet issued</span></a>
 </div>
 
 <div class="grid g2" style="margin-top:14px">
   <div class="card">
-    <div class="pad row"><h3>Top errors</h3><span class="spacer"></span><a class="small" href="{{ url_for('findings', slug=g.slug) }}">All findings →</a></div>
-    {% if top %}<table><tbody>
+    <div class="pad row"><h3>Top design-intent errors</h3><span class="spacer"></span><a class="small" href="{{ url_for('findings', slug=g.slug) }}">All findings →</a></div>
+    {% if not latest %}<div class="empty">Upload calcs and record the first issue to run the checks.</div>
+    {% elif top %}<table><tbody>
     {% for f in top %}<tr><td><span class="pill error">{{ f.title }}</span><div style="margin-top:4px">{{ f.message }}</div>
       <div class="muted small mono">{{ f.where }}</div></td></tr>{% endfor %}
     </tbody></table>{% else %}<div class="empty">No errors in Issue {{ latest.label }}.</div>{% endif %}
   </div>
-  <div class="card">
-    <div class="pad"><h3>Issues</h3></div>
-    <div class="scroll"><table>
-      <thead><tr><th>Issue</th><th>Date</th><th>Description</th><th>Docs</th><th></th></tr></thead><tbody>
-      {% for iss, nd, np in issues %}<tr>
-        <td class="mono"><b>{{ iss.label }}</b></td><td class="mono date">{{ iss.issued_on }}</td><td>{{ iss.note }}</td>
-        <td class="muted">{{ nd }} · {{ np }} pp</td>
-        <td style="white-space:nowrap"><a class="btn sm" href="{{ url_for('download_book', slug=g.slug, issue=iss.label) }}">Calc book</a>
-          <a class="btn sm" href="{{ url_for('download_report', slug=g.slug, issue=iss.label) }}">Report</a></td></tr>{% endfor %}
-      </tbody></table></div>
+  <div class="grid" style="align-content:start">
+    <div class="card">
+      <div class="pad row"><h3>Milestones</h3><span class="spacer"></span><span class="muted small">{{ ms_done }} of {{ ms_total }} done</span></div>
+      <div style="padding:0 18px 10px"><div class="bar"><i style="width:{{ (100 * ms_done / ms_total) if ms_total else 0 }}%"></i></div></div>
+      <table><tbody>{% for m in p.milestones %}<tr>
+        <td style="width:28px">{{ '✓' if m.done else '○' }}</td><td>{{ m.name }}</td>
+        <td class="mono muted date" style="text-align:right">{{ m.due or '—' }}</td></tr>
+      {% else %}<tr><td class="empty">Add milestones in Project info.</td></tr>{% endfor %}</tbody></table>
+    </div>
+    <div class="card">
+      <div class="pad"><h3>Issues</h3></div>
+      {% if issues %}<div class="scroll"><table>
+        <thead><tr><th>Issue</th><th>Date</th><th>Description</th><th>Docs</th><th></th></tr></thead><tbody>
+        {% for iss, nd, np in issues %}<tr>
+          <td class="mono"><b>{{ iss.label }}</b></td><td class="mono date">{{ iss.issued_on }}</td><td>{{ iss.note }}</td>
+          <td class="muted">{{ nd }} · {{ np }} pp</td>
+          <td style="white-space:nowrap"><a class="btn sm" href="{{ url_for('download_book', slug=g.slug, issue=iss.label) }}">Book</a>
+            <a class="btn sm" href="{{ url_for('download_report', slug=g.slug, issue=iss.label) }}">Report</a></td></tr>{% endfor %}
+        </tbody></table></div>{% else %}<div class="empty">No issues yet.</div>{% endif %}
+    </div>
   </div>
 </div>
-{% endif %}
+
+<h2>Activity</h2>
+<div class="card">
+  <ul class="feed">{% for e in events %}
+    <li><time>{{ e.created[5:10] }} {{ e.created[11:16] }}</time><span><span class="kind-tag">{{ e.kind }}</span>{{ e.text }}</span></li>
+  {% else %}<li><span></span><span class="muted">Uploads, issues, reviews, RFIs and submittals appear here.</span></li>{% endfor %}</ul>
+</div>
 {% endblock %}

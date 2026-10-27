@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><div><h1>RFIs</h1><div class="sub">Requests for information during design and construction.</div></div>
+  {% if edit %}<a class="btn" href="{{ url_for('rfis', slug=g.slug) }}">New RFI</a>{% endif %}</div>
+<div class="row" style="margin-bottom:14px">
+  <span class="pill open">{{ rows|selectattr('status', 'equalto', 'open')|list|length }} open</span>
+  <span class="pill error">{{ rows|selectattr('overdue')|list|length }} overdue</span>
+  <span class="pill answered">{{ rows|selectattr('status', 'equalto', 'answered')|list|length }} answered</span>
+  <span class="pill closed">{{ rows|selectattr('status', 'equalto', 'closed')|list|length }} closed</span>
+</div>
+<div class="card scroll"><table>
+  <thead><tr><th>No.</th><th>Subject</th><th>Status</th><th>From → To</th><th>Sent</th><th>Due</th><th>Affects</th><th></th></tr></thead><tbody>
+  {% for r in rows %}<tr>
+    <td class="mono date"><b>{{ r.number }}</b></td>
+    <td><b>{{ r.subject }}</b>{% if r.question %}<div class="small muted">{{ r.question[:140] }}{{ '…' if r.question|length > 140 }}</div>{% endif %}
+      {% if r.answer %}<div class="small"><span class="kind-tag">Answer</span>{{ r.answer[:140] }}</div>{% endif %}</td>
+    <td><span class="pill {{ r.status }}">{{ r.status }}</span>{% if r.impact %}<div class="small muted">{{ r.impact }}</div>{% endif %}</td>
+    <td class="small">{{ r.raised_by or '—' }} → {{ r.assigned_to or '—' }}</td>
+    <td class="mono small date">{{ r.sent_on or '—' }}</td>
+    <td class="mono small date {{ 'over' if r.overdue }}">{{ r.due_on or '—' }}{% if r.overdue %} · overdue{% endif %}</td>
+    <td class="small mono">{{ r.docs }}</td>
+    <td><a class="btn sm" href="{{ url_for('rfis', slug=g.slug, edit=r.id) }}">Edit</a></td></tr>
+  {% else %}<tr><td colspan="8" class="empty">No RFIs yet.</td></tr>{% endfor %}</tbody></table></div>
+
+<h2>{{ 'Edit ' ~ edit.number if edit else 'New RFI' }}</h2>
+{% set e = edit or {} %}
+<form class="card pad grid" method="post" action="{{ url_for('rfis_save', slug=g.slug) }}" style="gap:12px">
+  {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+  <div class="grid g4">
+    <label class="field">Number<input type="text" name="number" id="rfi-number" value="{{ e.number or next_no }}"></label>
+    <label class="field" style="grid-column:span 2">Subject<input type="text" name="subject" id="rfi-subject" value="{{ e.subject or '' }}" required placeholder="Beam B-12 penetration for lab exhaust duct"></label>
+    <label class="field">Status<select class="in" name="status" id="rfi-status">{% for s in statuses %}<option {{ 'selected' if e.status == s }}>{{ s }}</option>{% endfor %}</select></label>
+    <label class="field">Raised by<input type="text" name="raised_by" id="rfi-from" value="{{ e.raised_by or '' }}" placeholder="GC / architect"></label>
+    <label class="field">Assigned to<input type="text" name="assigned_to" id="rfi-to" value="{{ e.assigned_to or '' }}"></label>
+    <label class="field">Sent<input type="date" name="sent_on" id="rfi-sent" value="{{ e.sent_on or today }}"></label>
+    <label class="field">Response due<input type="date" name="due_on" id="rfi-due" value="{{ e.due_on or '' }}"></label>
+  </div>
+  <label class="field">Question<textarea name="question" id="rfi-question" rows="3" style="font-family:inherit">{{ e.question or '' }}</textarea></label>
+  <label class="field">Answer<textarea name="answer" id="rfi-answer" rows="3" style="font-family:inherit">{{ e.answer or '' }}</textarea></label>
+  <div class="grid g4">
+    <label class="field" style="grid-column:span 2">Affected documents / sheets<input type="text" name="docs" id="rfi-docs" value="{{ e.docs or '' }}" placeholder="S-201, GRV-02"></label>
+    <label class="field">Impact<select class="in" name="impact" id="rfi-impact">{% for s in ['', 'No impact', 'Calc revision needed', 'Drawing revision needed', 'Cost / schedule impact'] %}<option {{ 'selected' if e.impact == s }}>{{ s }}</option>{% endfor %}</select></label>
+    <label class="field">Answered<input type="date" name="answered_on" id="rfi-answered" value="{{ e.answered_on or '' }}"></label>
+  </div>
+  <div class="row"><span class="spacer"></span><button class="btn primary">Save RFI</button></div>
+</form>
+{% endblock %}

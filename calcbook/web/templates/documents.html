@@ -1,75 +1,232 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="top">
-  <div><h1>Upload documents</h1>
-    <div class="sub">Drop each sub-package's PDFs below. Uploading <span class="mono">GRV-02_RevB.pdf</span> replaces <span class="mono">GRV-02_RevA.pdf</span>. Nothing is recorded until you issue a revision.</div></div>
+  <div><h1>Report package</h1>
+    <div class="sub">Upload PDFs into sections and drag them into order. Numbering, contents, section title pages and bookmarks update themselves.</div></div>
+  <div class="row">
+    <a class="btn" href="{{ url_for('download_draft', slug=g.slug) }}">Build draft book</a>
+    {% if latest %}<a class="btn" href="{{ url_for('download_book', slug=g.slug) }}">Issue {{ latest.label }} book</a>{% endif %}
+  </div>
 </div>
 
-<form class="card pad" method="post" action="{{ url_for('make_issue', slug=g.slug) }}">
+<form class="card pad" method="post" action="{{ url_for('make_issue', slug=g.slug) }}" style="margin-bottom:16px">
   <div class="row" style="margin-bottom:10px"><h3>Record a new issue</h3>
     <span class="muted small">{% if latest %}Since Issue {{ latest.label }}: {% endif %}
       <span class="pill new">{{ pending.new }} new</span> <span class="pill modified">{{ pending.modified }} revised</span>
       <span class="pill withdrawn">{{ pending.withdrawn }} withdrawn</span></span></div>
   <div class="row">
-    <label class="field">Issue / revision<input type="text" name="label" value="{{ next_label }}" required size="6"></label>
-    <label class="field">Date<input type="date" name="date" value="{{ today }}"></label>
-    <label class="field" style="flex:1;min-width:220px">Description<input type="text" name="note" placeholder="e.g. Permit submittal"></label>
+    <label class="field">Issue / revision<input type="text" name="label" id="issue-label" value="{{ next_label }}" required size="6"></label>
+    <label class="field">Date<input type="date" name="date" id="issue-date" value="{{ today }}"></label>
+    <label class="field" style="flex:1;min-width:220px">Description<input type="text" name="note" id="issue-note" placeholder="e.g. Plan check response 1"></label>
     <button class="btn primary" style="align-self:flex-end">Issue revision</button>
   </div>
-  <div class="muted small" style="margin-top:8px">Snapshots every package as it is now, archives the PDFs, and captures the current design basis.</div>
+  <div class="muted small" style="margin-top:8px">Archives every file as it is now, captures the design basis, and tags changed sheets in the next book.</div>
 </form>
 
-{% for pkg in g.ws.project.packages %}
-<div class="card" id="pkg-{{ pkg.id }}" style="margin-top:14px">
-  <div class="pkg-head"><span class="id">{{ pkg.id }}</span><b>{{ pkg.title }}</b>
-    <span class="kind">{{ 'drawings' if pkg.is_drawings else 'calcs' }}</span>
+<div class="builder">
+<div id="sections" class="grid" style="align-content:start">
+{% for pkg in g.ws.project.packages if not pkg.is_drawings %}
+{% set sec = numbering.sections.get(pkg.id) %}
+<section class="card sec {{ 'off' if not pkg.include }}" id="pkg-{{ pkg.id }}" data-id="{{ pkg.id }}">
+  <div class="pkg-head">
+    <span class="handle" draggable="true" title="Drag to reorder sections" aria-label="Drag to reorder section">⠿</span>
+    <span class="secno">{{ sec.number if sec and pkg.include else '–' }}</span>
+    <b>{{ pkg.title }}</b><span class="id">{{ pkg.id }}</span>
     {% if pkg.responsible %}<span class="muted small">{{ pkg.responsible }}</span>{% endif %}
-    <span class="spacer"></span><span class="muted small">{{ files[pkg.id]|length }} file(s)</span></div>
-  <div class="pad">
-    <form class="upload" method="post" enctype="multipart/form-data" action="{{ url_for('upload', slug=g.slug) }}">
+    <span class="spacer"></span>
+    {% if not pkg.include %}<span class="pill withdrawn">not in book</span>
+    {% elif sec %}<span class="muted small">Sheets {{ sec.first }}–{{ sec.last }}</span>{% endif %}
+  </div>
+  <div class="pad" style="padding-top:12px;padding-bottom:12px">
+    <form class="upload row" method="post" enctype="multipart/form-data" action="{{ url_for('upload', slug=g.slug) }}" style="gap:8px">
       <input type="hidden" name="package" value="{{ pkg.id }}">
-      <label class="drop"><input type="file" name="files" accept="application/pdf,.pdf" multiple>
-        <b>Drop PDFs here</b> or click to choose — {{ 'drawing sheets are matched by sheet number' if pkg.is_drawings else 'one calculation per file' }}</label>
+      <label class="drop" style="flex:1;min-width:220px"><input type="file" name="files" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff" multiple>
+        <b>Drop PDFs or scans</b> or click to choose</label>
+      <label class="field" style="min-width:180px">Insert
+        <select class="in" name="position">
+          <option value="end">at the end</option>
+          <option value="start">at the top</option>
+          {% for f in files[pkg.id] %}<option value="after:{{ f.name }}">after {{ f.number or loop.index }} {{ f.title }}</option>{% endfor %}
+        </select></label>
     </form>
   </div>
-  {% if files[pkg.id] %}
-  <div class="scroll"><table>
-    <thead><tr><th>File</th><th>Status</th><th>Size</th><th></th></tr></thead><tbody>
-    {% for f in files[pkg.id] %}<tr>
-      <td class="mono">{{ f.rel }}</td>
-      <td><span class="pill {{ f.status }}">{{ {'issued': 'in Issue ' ~ f.issued_rev, 'modified': 'revised', 'new': 'new'}[f.status] }}</span></td>
-      <td class="muted">{{ '%.0f'|format(f.size/1024) }} KB</td>
-      <td style="text-align:right"><form method="post" action="{{ url_for('remove_file', slug=g.slug) }}" onsubmit="return confirm('Remove {{ f.rel }}? It will be withdrawn in the next issue.')">
+  <ol class="doclist" data-pkg="{{ pkg.id }}">
+    {% for f in files[pkg.id] %}
+    <li class="doc" draggable="true" data-name="{{ f.name }}">
+      <span class="handle" title="Drag to reorder">⠿</span>
+      <span class="mono muted num">{{ f.number or '·' }}</span>
+      <span class="t"><b>{{ f.title }}</b><span class="muted small mono">{{ f.rel }}</span></span>
+      <span class="muted small">{{ f.pages }} pp</span>
+      <span class="muted small mono sheet">{% if f.start %}sh. {{ f.start }}{% endif %}</span>
+      <span class="pill {{ f.status }}">{{ {'issued': 'in ' ~ f.issued_rev, 'modified': 'revised', 'new': 'new'}[f.status] }}</span>
+      <span class="moves">
+        <button type="button" class="btn sm up" title="Move up" aria-label="Move up">↑</button>
+        <button type="button" class="btn sm down" title="Move down" aria-label="Move down">↓</button>
+      </span>
+      <form method="post" action="{{ url_for('remove_file', slug=g.slug) }}" class="rm">
         <input type="hidden" name="package" value="{{ pkg.id }}"><input type="hidden" name="rel" value="{{ f.rel }}">
-        <button class="btn sm danger">Remove</button></form></td>
-    </tr>{% endfor %}
-    </tbody></table></div>
-  {% endif %}
-</div>
+        <button class="btn sm danger" title="Remove from package">✕</button></form>
+    </li>
+    {% else %}<li class="empty-row muted small">No calculations yet — drop PDFs above or drag one here.</li>{% endfor %}
+  </ol>
+  <details class="secedit"><summary class="small">Section settings</summary>
+    <form method="post" action="{{ url_for('section', slug=g.slug) }}" class="pad grid" style="gap:10px;padding-top:4px">
+      <input type="hidden" name="action" value="update"><input type="hidden" name="id" value="{{ pkg.id }}">
+      <div class="row">
+        <label class="field" style="flex:1">Title<input type="text" name="title" value="{{ pkg.title }}"></label>
+        <label class="field" style="flex:1">Responsible engineer<input type="text" name="responsible" value="{{ pkg.responsible }}"></label>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" name="include" {{ 'checked' if pkg.include }}> Include in the book</label>
+        <label class="check"><input type="checkbox" name="title_page" {{ 'checked' if pkg.title_page }}> Section title page</label>
+        <span class="spacer"></span><button class="btn sm primary">Save section</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('section', slug=g.slug) }}" class="pad row" style="padding-top:0">
+      <input type="hidden" name="action" value="remove"><input type="hidden" name="id" value="{{ pkg.id }}">
+      <span class="muted small">Not needed on this project? Removing keeps any files in <span class="mono">_removed_sections/</span>.</span>
+      <span class="spacer"></span><button class="btn sm danger">Remove section</button>
+    </form>
+  </details>
+</section>
 {% endfor %}
 
+<h2 style="margin:8px 0 0">Drawing sets</h2>
+{% for pkg in g.ws.project.packages if pkg.is_drawings %}
+<section class="card" id="pkg-{{ pkg.id }}">
+  <div class="pkg-head"><b>{{ pkg.title }}</b><span class="id">{{ pkg.id }}</span><span class="spacer"></span>
+    <span class="muted small">{{ files[pkg.id]|length }} file(s) · tracked under Drawing changes</span></div>
+  <div class="pad" style="padding-top:12px;padding-bottom:12px">
+    <form class="upload" method="post" enctype="multipart/form-data" action="{{ url_for('upload', slug=g.slug) }}">
+      <input type="hidden" name="package" value="{{ pkg.id }}"><input type="hidden" name="position" value="end">
+      <label class="drop"><input type="file" name="files" accept=".pdf" multiple><b>Drop drawing PDFs</b> — sheets are matched by sheet number</label>
+    </form>
+  </div>
+  {% if files[pkg.id] %}<ol class="doclist static">{% for f in files[pkg.id] %}
+    <li class="doc"><span class="t"><b class="mono">{{ f.rel }}</b></span><span class="muted small">{{ f.pages }} sheets</span>
+      <span class="pill {{ f.status }}">{{ {'issued': 'in ' ~ f.issued_rev, 'modified': 'revised', 'new': 'new'}[f.status] }}</span>
+      <form method="post" action="{{ url_for('remove_file', slug=g.slug) }}" class="rm"><input type="hidden" name="package" value="{{ pkg.id }}">
+        <input type="hidden" name="rel" value="{{ f.rel }}"><button class="btn sm danger" title="Remove">✕</button></form></li>{% endfor %}</ol>{% endif %}
+</section>
+{% else %}<div class="card pad muted small">No drawing sets. Add one with “Add section” and choose Drawing set.</div>{% endfor %}
+
 {% if withdrawn %}
-<h2>Will be withdrawn in the next issue</h2>
-<div class="card scroll"><table><tbody>
-{% for d in withdrawn %}<tr><td class="mono">{{ d.doc_key }}</td><td>{{ d.title }}</td><td><span class="pill withdrawn">withdrawn</span></td></tr>{% endfor %}
-</tbody></table></div>
+<div class="card pad"><h3>Withdrawn in the next issue</h3>
+  {% for d in withdrawn %}<div class="small"><span class="pill withdrawn">withdrawn</span> {{ d.title }} <span class="muted mono">{{ d.doc_key }}</span></div>{% endfor %}</div>
 {% endif %}
+</div>
+
+<aside class="grid panel" style="align-content:start">
+  <div class="card">
+    <div class="pad" style="padding-bottom:8px"><h3>Next book</h3>
+      <div class="muted small">{{ numbering.total }} sheets · {{ numbering.front }} front matter · updates as you reorder</div></div>
+    <ol class="toc">
+      <li class="muted"><span>Cover · Contents{% if latest %} · Revision summary{% endif %}</span><span class="mono">1–{{ numbering.front }}</span></li>
+      {% for pkg in g.ws.project.book_sections %}{% set sec = numbering.sections.get(pkg.id) %}{% if sec %}
+      <li class="sechead"><span>{{ sec.number }}&nbsp; {{ pkg.title }}</span><span class="mono">{{ sec.first }}</span></li>
+      {% for f in files[pkg.id] %}<li><span><span class="muted mono">{{ f.number }}</span> {{ f.title }}{% if f.status != 'issued' %} <span class="dot {{ f.status }}" title="{{ f.status }}"></span>{% endif %}</span><span class="mono">{{ f.start }}</span></li>{% endfor %}
+      {% endif %}{% endfor %}
+    </ol>
+  </div>
+
+  <form class="card pad grid" id="signatures" method="post" action="{{ url_for('signatures', slug=g.slug) }}" style="gap:10px">
+    <h3>Signature block</h3>
+    <div class="muted small" style="margin-top:-6px">Printed on the cover of every book.</div>
+    {% for role, label in roles %}{% set s = g.ws.project.signatures.get(role, {}) %}
+    <div class="row" style="gap:6px">
+      <label class="field" style="flex:2;min-width:120px">{{ label }}<input type="text" id="{{ role }}_name" name="{{ role }}_name" value="{{ s.get('name', '') }}"></label>
+      <label class="field" style="flex:1;min-width:110px">Date<input type="date" id="{{ role }}_date" name="{{ role }}_date" value="{{ s.get('date', '') }}"></label>
+    </div>{% endfor %}
+    <div class="row"><span class="spacer"></span><button class="btn sm primary">Save signatures</button></div>
+  </form>
+
+  <form class="card pad grid" method="post" action="{{ url_for('section', slug=g.slug) }}" style="gap:10px">
+    <h3>Add section</h3>
+    <input type="hidden" name="action" value="add">
+    <label class="field">Title<input type="text" name="title" id="new-section" placeholder="e.g. Elevator Pit" required></label>
+    <div class="row">
+      <label class="field" style="flex:1">Type<select class="in" name="kind"><option value="calcs">Calculations</option><option value="drawings">Drawing set</option></select></label>
+      <label class="field" style="flex:1">Place after<select class="in" name="after">
+        {% for p in g.ws.project.packages %}<option value="{{ p.id }}" {{ 'selected' if loop.last }}>{{ p.title }}</option>{% endfor %}</select></label>
+    </div>
+    <div class="row"><span class="muted small">Creates the section folder.</span><span class="spacer"></span><button class="btn sm primary">Add section</button></div>
+  </form>
+
+  <form class="card pad grid" method="post" action="{{ url_for('save_template', slug=g.slug) }}" style="gap:10px">
+    <h3>Save as template</h3>
+    <div class="muted small" style="margin-top:-6px">Reuse this section structure when you start the next project.</div>
+    <div class="row"><input type="text" name="name" id="template-name" placeholder="e.g. Tilt-up warehouse" style="flex:1">
+      <button class="btn sm">Save</button></div>
+  </form>
+</aside>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
-document.querySelectorAll('form.upload').forEach(function(form){
-  var drop=form.querySelector('.drop'), input=form.querySelector('input[type=file]');
-  function send(files){ if(!files.length) return;
-    var fd=new FormData(); fd.append('package', form.package.value);
-    for (var i=0;i<files.length;i++) fd.append('files', files[i]);
-    drop.innerHTML='<b>Uploading '+files.length+' file(s)…</b>';
-    fetch(form.action,{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
-      .then(function(){ location.hash='pkg-'+form.package.value; location.reload(); });
+(function(){
+  var ORDER_URL = "{{ url_for('order', slug=g.slug) }}";
+  // ---------- uploads (drop or pick) ----------
+  document.querySelectorAll('form.upload').forEach(function(form){
+    var drop=form.querySelector('.drop'), input=form.querySelector('input[type=file]');
+    function send(files){ if(!files.length) return;
+      var fd=new FormData(form); fd.delete('files');
+      for (var i=0;i<files.length;i++) fd.append('files', files[i]);
+      drop.innerHTML='<b>Uploading '+files.length+' file(s)…</b>';
+      fetch(form.action,{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
+        .then(function(){ location.hash='pkg-'+form.package.value; location.reload(); });
+    }
+    input.addEventListener('change', function(){ send(input.files); });
+    ['dragenter','dragover'].forEach(function(e){drop.addEventListener(e,function(ev){ if(ev.dataTransfer.types.indexOf('Files')<0) return; ev.preventDefault();drop.classList.add('over');});});
+    ['dragleave','drop'].forEach(function(e){drop.addEventListener(e,function(){drop.classList.remove('over');});});
+    drop.addEventListener('drop', function(ev){ if(!ev.dataTransfer.files.length) return; ev.preventDefault(); send(ev.dataTransfer.files); });
+  });
+
+  // ---------- ordering ----------
+  function state(){
+    var s={sections:[],docs:{}};
+    document.querySelectorAll('#sections section.sec').forEach(function(sec){ s.sections.push(sec.dataset.id); });
+    document.querySelectorAll('.doclist[data-pkg]').forEach(function(ol){
+      s.docs[ol.dataset.pkg]=[].map.call(ol.querySelectorAll('li.doc'),function(li){return li.dataset.name;});
+    });
+    return s;
   }
-  input.addEventListener('change', function(){ send(input.files); });
-  ['dragenter','dragover'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.add('over');});});
-  ['dragleave','drop'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.remove('over');});});
-  drop.addEventListener('drop', function(ev){ send(ev.dataTransfer.files); });
-});
+  function save(){
+    document.body.style.cursor='progress';
+    fetch(ORDER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(state())})
+      .then(function(r){return r.json();}).then(function(){ location.reload(); });
+  }
+  var dragged=null, kind=null;
+  document.querySelectorAll('li.doc[draggable]').forEach(function(li){
+    li.addEventListener('dragstart',function(e){ dragged=li; kind='doc'; li.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain','doc'); });
+    li.addEventListener('dragend',function(){ li.classList.remove('dragging'); });
+  });
+  document.querySelectorAll('.doclist[data-pkg]').forEach(function(ol){
+    ol.addEventListener('dragover',function(e){ if(kind!=='doc') return; e.preventDefault();
+      var after=[].filter.call(ol.querySelectorAll('li.doc:not(.dragging)'),function(li){
+        var r=li.getBoundingClientRect(); return e.clientY > r.top + r.height/2; }).pop();
+      var empty=ol.querySelector('.empty-row'); if(empty) empty.remove();
+      if(after) after.after(dragged); else ol.prepend(dragged);
+    });
+    ol.addEventListener('drop',function(e){ if(kind!=='doc') return; e.preventDefault(); kind=null; save(); });
+  });
+  var secs=document.getElementById('sections');
+  document.querySelectorAll('section.sec .handle').forEach(function(h){
+    var sec=h.closest('section');
+    h.addEventListener('dragstart',function(e){ dragged=sec; kind='sec'; sec.classList.add('dragging'); e.dataTransfer.setData('text/plain','sec'); });
+    h.addEventListener('dragend',function(){ sec.classList.remove('dragging'); });
+  });
+  secs.addEventListener('dragover',function(e){ if(kind!=='sec') return; e.preventDefault();
+    var list=[].filter.call(secs.querySelectorAll('section.sec:not(.dragging)'),function(s){
+      var r=s.getBoundingClientRect(); return e.clientY > r.top + r.height/2; });
+    var after=list.pop(); if(after) after.after(dragged); else secs.prepend(dragged);
+  });
+  secs.addEventListener('drop',function(e){ if(kind!=='sec') return; e.preventDefault(); kind=null; save(); });
+  document.querySelectorAll('li.doc .up, li.doc .down').forEach(function(b){
+    b.addEventListener('click',function(){ var li=b.closest('li');
+      if(b.classList.contains('up') && li.previousElementSibling) li.previousElementSibling.before(li);
+      else if(b.classList.contains('down') && li.nextElementSibling) li.nextElementSibling.after(li);
+      else return; save(); });
+  });
+})();
 </script>
 {% endblock %}

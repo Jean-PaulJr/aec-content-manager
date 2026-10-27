@@ -24,6 +24,39 @@ def read_pdf_pages(path: Path) -> list[str]:
         return [(p.extract_text() or "") for p in PdfReader(str(path)).pages]
 
 
+def ocr_available() -> bool:
+    import shutil
+    return shutil.which("tesseract") is not None
+
+
+def ocr_missing_text(path: Path, pages: list[str], dpi: int = 220) -> list[str]:
+    """Fill in pages that have no text layer (scanned hand calcs) with OCR text,
+    when Tesseract is installed. Pages that already have text are untouched."""
+    missing = [i for i, t in enumerate(pages) if not t.strip()]
+    if not missing or not ocr_available():
+        return pages
+    import subprocess
+    import tempfile
+
+    import pypdfium2 as pdfium
+    out = list(pages)
+    pdf = pdfium.PdfDocument(str(path))
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in missing:
+                img = Path(tmp) / f"p{i}.png"
+                pdf[i].render(scale=dpi / 72).to_pil().convert("L").save(img)
+                try:
+                    r = subprocess.run(["tesseract", str(img), "stdout", "--psm", "6"],
+                                       capture_output=True, text=True, timeout=120)
+                    out[i] = r.stdout if r.returncode == 0 else ""
+                except (subprocess.SubprocessError, OSError):
+                    out[i] = ""
+    finally:
+        pdf.close()
+    return out
+
+
 def pdf_title(path: Path) -> str | None:
     try:
         from pypdf import PdfReader

@@ -1,29 +1,53 @@
-# aec-content-manager — calcbook
+# AEC Content Manager
 
-A Python tool for structural engineers that
+Project management for structural engineers, built in Python and run as a local web app. It compiles calculation packages, tracks every revision of calcs and drawings, checks that design intent is followed, and keeps the project's QA reviews, RFIs and submittals in one place from planning through construction.
 
-1. **compiles** calculations from multiple sub-packages (gravity, lateral, foundations, connections, delegated design…) into one bookmarked calculation book,
-2. **tracks revisions** of every document across issues and shows exactly what changed — documents, pages, design values, member sizes, D/C ratios, and the design basis itself,
-3. **tracks drawing changes visually** — sheets are matched by sheet number and overlaid, with changed areas clouded,
-4. **cross-checks** every calc and drawing against a single design basis, and against each other, to confirm design intent is being followed.
-
-It handles many projects at once, through a local web app or the command line.
+| Goal | Where |
+|---|---|
+| Report package from PDFs with a customizable section template | **Report package**: sections from a template, add/remove/rename sections, drag-and-drop ordering, insert new files at a chosen position |
+| Cover sheet, section title pages, table of contents, bookmarks, signature block, page numbers | Generated in every **calc book**; numbering, contents and bookmarks update when pages are added |
+| Revision documentation added automatically | Revision summary page, REVISED/NEW tags on changed sheets, issue history on the cover |
+| Track all revision versions | **Issues** archive every PDF; **Calc changes**, **Register**, `calcbook history` |
+| Visual drawing comparison | **Drawing changes**: overlay, swipe, side by side, clouded changes |
+| Contradictions between PDFs / design intent | **Design intent**: every calc and drawing checked against the design basis and each other |
+| QA log for reviews and approvals | **QA reviews** |
+| RFIs and submittals | **RFIs**, **Submittals** with due dates and overdue flags |
+| Project progress | **Dashboard**: phase, milestones, open items, activity timeline |
+| Multiple projects | Project switcher; one folder per project in the workspace |
+| Any calc software's output | PDFs from RISA, ENERCALC, Mathcad, Excel…; photos or scans of hand calcs (JPG/PNG/TIFF) are converted to PDF and read with OCR when Tesseract is installed |
+| Save to the company server | Point `--workspace` at a mapped drive or UNC path |
+| Templates | Built-in package templates, plus **Save as template** from any project |
 
 ## Install
 
 ```bash
 pip install -e .            # Python 3.10+
 calcbook serve --workspace projects          # web app at http://127.0.0.1:8000
+calcbook serve --workspace "\\fileserver\Projects\Structural"   # or a folder on the company server
 ```
 
-Click **Load demo project** on the home page to see a project with two issues, four calc packages and a drawing set.
+Click **Load demo project** on the home page to see a project with two issues, four calc sections, a scanned hand calc, a drawing set, QA reviews, RFIs and submittals.
+
+Optional: install [Tesseract](https://github.com/tesseract-ocr/tesseract) so scanned hand calcs are read and checked too.
+
+## Building a report package
+
+1. **Create a project** and pick a package template (commercial steel & concrete, wood-framed multifamily, seismic retrofit, blank, or one you saved). Section folders are created for you.
+2. **Upload** PDFs (or scans) into each section. Choose *Insert at the end / at the top / after 1.2* so a plan-check addition lands in the right place. Uploading `GRV-02_RevB.pdf` replaces `GRV-02_RevA.pdf` and keeps its position.
+3. **Order** calcs by dragging them (or the ↑ ↓ buttons); drag between sections to move a calc; drag section handles to reorder sections. Turn a section off, or remove it, when the project doesn't need it (removed files are kept in `_removed_sections/`).
+4. The **Next book** panel shows the contents with live sheet numbers. **Build draft book** gives you the PDF at any time.
+5. Fill in the **signature block** (prepared / checked / approved by) and **Issue revision**. The issued book adds a revision summary and tags every changed sheet.
 
 ## Web app
 
 | Page | What it does |
 |---|---|
-| Projects | All projects in the workspace folder; create a new one. Switch projects from the sidebar. |
-| Upload documents | Drag-and-drop PDFs into each sub-package. Uploading `GRV-02_RevB.pdf` replaces `GRV-02_RevA.pdf`. Files are marked new / revised / in issue, and **Issue revision** records the snapshot. |
+| Projects | All projects in the workspace folder; create one from a template. Switch projects from the sidebar. |
+| Dashboard | Phase, milestones, design-intent errors, QA progress, open and overdue RFIs and submittals, activity timeline, issues with book and report downloads. |
+| Report package | Sections, uploads, ordering, live contents, signature block, add section, save as template, draft book, issue revision. |
+| Project info | Name, number, client, address, engineer of record, phase, milestones. |
+| QA reviews | Submit, comment, return, check and approve calcs (one or many at once); full review history. |
+| RFIs / Submittals | Logs with status, parties, dates, affected sheets, impact, and overdue flags. |
 | Design intent | All findings for an issue, filterable, with the design basis in force. CSV export. |
 | Calc changes | Documents, pages, design values, member sizes and D/C changes between any two issues, with text diffs. |
 | Drawing changes | Every sheet with a clouded change thumbnail. The sheet viewer has **Overlay** (red removed, blue added), **Swipe**, **Side by side** and single-issue views, zoom/pan, a list of changed areas (click or use arrow keys to jump) and the text that changed (e.g. `W16X31 → W18X35`). |
@@ -128,7 +152,8 @@ Checks work on the PDF text layer — scanned calcs need OCR first (they are fla
 ```
 calcbook/  config.py  store.py  ingest.py  extract.py  rules.py  units.py
            history.py diff.py   checks.py  compile.py  report.py cli.py
-           drawings.py (visual compare)  projects.py (multi-project, uploads)  demo.py
+           drawings.py (visual compare)  projects.py (projects, templates, sections, uploads)
+           tracker.py (QA, RFIs, submittals, activity)  demo.py
            web/ (Flask app: templates/, static/)
 examples/build_demo.py      tests/test_calcbook.py
 ```

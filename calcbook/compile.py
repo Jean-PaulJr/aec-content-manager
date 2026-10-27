@@ -1,15 +1,27 @@
-"""Compile every sub-package of an issue into one bookmarked calculation book.
+"""Compile a report package (calculation book) from its sections.
 
-Front matter: cover (with issue history and package register), contents, and a
-revision summary. Every sheet gets a footer with project, document and
-"Sheet n of N"; sheets whose text changed since the previous issue get a
-revision delta tag in the top-right corner.
+The book follows the project's section template: sections in order, documents in
+the order the user set, excluded sections left out. It contains
+
+  * a cover with project info, section register, issue history, a signature
+    block (prepared / checked / approved by) and an engineer's stamp box,
+  * a table of contents with sheet numbers,
+  * a revision summary listing the sheets that changed since the last issue,
+  * a title page in front of each section,
+  * every calculation sheet, stamped with "Sheet n of N", and tagged REVISED or
+    NEW when its content changed since the previous issue,
+  * bookmarks for sections and documents.
+
+Because numbering, contents and the revision summary are generated, adding a
+page anywhere renumbers everything. A book can be built from a recorded issue,
+or as a draft from the files currently uploaded.
 """
 from __future__ import annotations
 
 import io
 import math
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter, Transformation
@@ -18,9 +30,12 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
+from .config import SIGN_ROLES, Package
+from .extract import file_sha256, page_hash, read_pdf_pages
 from .history import (NEW, REMOVED, REVISED, UNCHANGED, Workspace, changed_pages, compress_ranges,
                       doc_statuses, issues_upto, package_revisions)
-from .store import DocRecord, Issue
+from .ingest import doc_key_for, scan_package
+from .store import Issue
 
 W, H = letter
 M = 54
@@ -30,20 +45,130 @@ INK = HexColor("#1d2430")
 MUTED = HexColor("#6b7280")
 RULE = HexColor("#d4d8de")
 ACCENT = HexColor("#1f4e79")
+TINT = HexColor("#f4f6f9")
 DELTA = HexColor("#c0392b")
 NEW_C = HexColor("#1e7a46")
+DRAFT_C = HexColor("#b45309")
+
+
+# --------------------------------------------------------------------------- #
+# Book model
+# --------------------------------------------------------------------------- #
+@dataclass
+class BookDoc:
+    key: str
+    package: str
+    title: str
+    path: Path
+    n_pages: int
+    status: str = UNCHANGED
+    changed: list[int] = field(default_factory=list)   # 1-based pages within the document
+    number: str = ""                                    # "2.3"
+    start: int = 0                                      # first sheet in the book
 
 
 @dataclass
-class Entry:
-    doc: DocRecord
-    status: str
-    changed: list[int]                  # 1-based pages within the document
-    start: int = 0                      # first sheet number in the book
-    sheets: list[int] = field(default_factory=list)
+class BookSection:
+    pkg: Package
+    number: int
+    docs: list[BookDoc]
+    title_sheet: int = 0                                # 0 = no title page
+
+    @property
+    def first_sheet(self) -> int:
+        return self.title_sheet or (self.docs[0].start if self.docs else 0)
+
+    @property
+    def last_sheet(self) -> int:
+        return (self.docs[-1].start + self.docs[-1].n_pages - 1) if self.docs else self.title_sheet
 
 
+@dataclass
+class BookSpec:
+    label: str                       # "B", or "Draft"
+    issued_on: str
+    note: str
+    draft: bool
+    prev_label: str | None
+    prev_date: str | None
+    sections: list[BookSection]
+    removed: list[tuple[str, str]]   # (package, title)
+    history: list[tuple[str, str, str]]
+    pkg_revs: dict[str, str]
+
+    @property
+    def docs(self) -> list[BookDoc]:
+        return [d for s in self.sections for d in s.docs]
+
+
+def _sections_from(ws: Workspace, docs: list[BookDoc]) -> list[BookSection]:
+    out, n = [], 0
+    for pkg in ws.project.book_sections:
+        ds = sorted((d for d in docs if d.package == pkg.id), key=lambda d: pkg.rank(d.key.split("/", 1)[-1]))
+        if not ds:
+            continue
+        n += 1
+        for i, d in enumerate(ds, 1):
+            d.number = f"{n}.{i}"
+        out.append(BookSection(pkg, n, ds))
+    return out
+
+
+def spec_from_issue(ws: Workspace, issue: Issue) -> BookSpec:
+    prev = ws.store.previous(issue)
+    in_book = {p.id for p in ws.project.book_sections}
+    cur = {k: d for k, d in ws.store.documents_by_key(issue).items() if d.package in in_book}
+    old = {k: d for k, d in (ws.store.documents_by_key(prev) if prev else {}).items() if d.package in in_book}
+    st = doc_statuses(old if prev else None, cur)
+    docs = []
+    for k, d in cur.items():
+        ch = []
+        if prev and st[k] in (NEW, REVISED):
+            ch = changed_pages(ws.hashes(old[k]) if k in old else None, ws.hashes(d))
+        docs.append(BookDoc(k, d.package, d.title, ws.store.archived_file(d), d.n_pages, st[k], ch))
+    removed = [(d.package, d.title) for k, d in old.items() if st.get(k) == REMOVED]
+    return BookSpec(issue.label, issue.issued_on, issue.note, False,
+                    prev.label if prev else None, prev.issued_on if prev else None,
+                    _sections_from(ws, docs), removed,
+                    [(i.label, i.issued_on, i.note) for i in issues_upto(ws.store, issue)],
+                    package_revisions(ws.store, issue))
+
+
+def spec_from_working(ws: Workspace) -> BookSpec:
+    """A draft book from the files uploaded now, compared with the latest issue."""
+    from .extract import humanize, pdf_title, strip_rev_suffix
+    latest = ws.store.latest()
+    old = ws.store.documents_by_key(latest) if latest else {}
+    docs, seen = [], set()
+    for pkg in ws.project.book_sections:
+        for f in scan_package(pkg.path):
+            key = doc_key_for(pkg.id, f.relative_to(pkg.path))
+            seen.add(key)
+            pages = read_pdf_pages(f)
+            o = old.get(key)
+            if o is None:
+                status, ch = NEW, (list(range(1, len(pages) + 1)) if latest else [])
+            elif o.sha256 == file_sha256(f):
+                status, ch = UNCHANGED, []
+            else:
+                status, ch = REVISED, changed_pages(ws.hashes(o), [page_hash(t) for t in pages])
+            title = pdf_title(f) or humanize(strip_rev_suffix(f.stem))
+            docs.append(BookDoc(key, pkg.id, title, f, len(pages), status, ch))
+    in_book = {p.id for p in ws.project.book_sections}
+    removed = [(d.package, d.title) for k, d in old.items() if k not in seen and d.package in in_book]
+    hist = [(i.label, i.issued_on, i.note) for i in ws.store.issues()]
+    hist.append(("Draft", date.today().isoformat(), "Work in progress — not issued"))
+    return BookSpec("Draft", date.today().isoformat(), "Work in progress — not issued", True,
+                    latest.label if latest else None, latest.issued_on if latest else None,
+                    _sections_from(ws, docs), removed, hist,
+                    package_revisions(ws.store, latest) if latest else {})
+
+
+# --------------------------------------------------------------------------- #
+# Drawing helpers
+# --------------------------------------------------------------------------- #
 def _fit(text: str, font: str, size: float, width: float) -> str:
+    text = text or ""
     if stringWidth(text, font, size) <= width:
         return text
     while text and stringWidth(text + "…", font, size) > width:
@@ -51,15 +176,23 @@ def _fit(text: str, font: str, size: float, width: float) -> str:
     return text + "…"
 
 
-def _page_header(c: canvas.Canvas, title: str, ws: Workspace, issue: Issue) -> float:
+def _issue_name(spec: BookSpec) -> str:
+    return "Draft" if spec.draft else f"Issue {spec.label}"
+
+
+def _band(c) -> None:
     c.setFillColor(ACCENT)
     c.rect(0, H - 8, W, 8, stroke=0, fill=1)
+
+
+def _page_header(c, title: str, ws: Workspace, spec: BookSpec) -> float:
+    _band(c)
     c.setFillColor(INK)
     c.setFont("Helvetica-Bold", 17)
     c.drawString(M, H - M - 4, title)
     c.setFont("Helvetica", 8.5)
     c.setFillColor(MUTED)
-    c.drawRightString(W - M, H - M - 2, f"{ws.project.number}  {ws.project.name}  ·  Issue {issue.label}")
+    c.drawRightString(W - M, H - M - 2, f"{ws.project.number}  {ws.project.name}  ·  {_issue_name(spec)}")
     c.setStrokeColor(RULE)
     c.setLineWidth(0.6)
     c.line(M, H - M - 14, W - M, H - M - 14)
@@ -71,149 +204,167 @@ def _status_label(status: str) -> tuple[str, object]:
             UNCHANGED: ("—", MUTED)}[status]
 
 
-# --------------------------------------------------------------------------- #
-def _draw_cover(c, ws: Workspace, issue: Issue, entries: list[Entry], total: int) -> None:
+def _draw_cover(c, ws: Workspace, spec: BookSpec, total: int) -> None:
     p = ws.project
-    c.setFillColor(ACCENT)
-    c.rect(0, H - 8, W, 8, stroke=0, fill=1)
-    y = H - 110
+    _band(c)
+    y = H - 104
     c.setFillColor(MUTED)
     c.setFont("Helvetica-Bold", 9)
     c.drawString(M, y, "S T R U C T U R A L   C A L C U L A T I O N S")
-    y -= 34
+    y -= 32
     c.setFillColor(INK)
     c.setFont("Helvetica-Bold", 26)
     c.drawString(M, y, _fit(p.name, "Helvetica-Bold", 26, W - 2 * M))
-    y -= 22
-    c.setFont("Helvetica", 11)
+    y -= 20
+    c.setFont("Helvetica", 10.5)
     c.setFillColor(MUTED)
-    bits = [b for b in (f"Project {p.number}" if p.number else "", p.client) if b]
-    c.drawString(M, y, "   ·   ".join(bits))
+    bits = [b for b in (f"Project {p.number}" if p.number else "", p.client, p.address) if b]
+    c.drawString(M, y, _fit("   ·   ".join(bits), "Helvetica", 10.5, W - 2 * M))
 
     # Issue box
-    y -= 48
-    c.setStrokeColor(RULE)
-    c.setFillColor(HexColor("#f4f6f9"))
+    y -= 40
+    c.setStrokeColor(DRAFT_C if spec.draft else RULE)
+    c.setFillColor(TINT)
     c.roundRect(M, y - 58, W - 2 * M, 70, 6, stroke=1, fill=1)
-    c.setFillColor(ACCENT)
-    c.setFont("Helvetica-Bold", 30)
-    c.drawString(M + 18, y - 34, f"Issue {issue.label}")
+    c.setFillColor(DRAFT_C if spec.draft else ACCENT)
+    c.setFont("Helvetica-Bold", 28)
+    c.drawString(M + 18, y - 34, "DRAFT" if spec.draft else f"Issue {spec.label}")
     c.setFillColor(INK)
     c.setFont("Helvetica", 10)
-    c.drawString(M + 200, y - 14, f"Date: {issue.issued_on}")
-    c.drawString(M + 200, y - 30, f"Sheets: {total}    Documents: {len(entries)}")
+    c.drawString(M + 200, y - 14, f"Date: {spec.issued_on}")
+    c.drawString(M + 200, y - 30, f"Sheets: {total}    Sections: {len(spec.sections)}    "
+                                  f"Calculations: {len(spec.docs)}")
     c.setFillColor(MUTED)
-    c.drawString(M + 200, y - 46, _fit(issue.note or "", "Helvetica", 10, W - 2 * M - 220))
+    c.drawString(M + 200, y - 46, _fit(spec.note or "", "Helvetica", 10, W - 2 * M - 220))
 
-    # Package register
-    y -= 96
+    # Section register
+    y -= 90
     c.setFillColor(INK)
     c.setFont("Helvetica-Bold", 11)
-    c.drawString(M, y, "Sub-packages")
-    y -= 8
-    cols = [M, M + 52, M + 260, M + 380, M + 430, W - M]
-    c.setFont("Helvetica-Bold", 8)
-    c.setFillColor(MUTED)
-    y -= 14
-    for x, t in zip(cols, ["ID", "Package", "Responsible", "Docs", "Sheets"]):
-        c.drawString(x, y, t)
-    c.drawRightString(W - M, y, "Pkg rev")
-    c.setStrokeColor(RULE)
-    c.line(M, y - 5, W - M, y - 5)
-    pkg_rev = package_revisions(ws.store, issue)
-    c.setFont("Helvetica", 9)
-    for pkg in [q for q in p.packages if not q.is_drawings]:
-        es = [e for e in entries if e.doc.package == pkg.id]
-        y -= ROW
-        c.setFillColor(INK)
-        c.drawString(cols[0], y, pkg.id)
-        c.drawString(cols[1], y, _fit(pkg.title, "Helvetica", 9, 200))
-        c.drawString(cols[2], y, _fit(pkg.responsible or pkg.discipline, "Helvetica", 9, 115))
-        c.drawString(cols[3], y, str(len(es)))
-        c.drawString(cols[4], y, str(sum(e.doc.n_pages for e in es)))
-        c.drawRightString(W - M, y, pkg_rev.get(pkg.id, "—"))
-
-    # Issue history
-    y -= 40
-    c.setFillColor(INK)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(M, y, "Issue history")
+    c.drawString(M, y, "Sections")
     y -= 22
+    cols = [M, M + 26, M + 250, M + 380, M + 420]
     c.setFont("Helvetica-Bold", 8)
     c.setFillColor(MUTED)
-    c.drawString(M, y, "Issue")
-    c.drawString(M + 52, y, "Date")
-    c.drawString(M + 140, y, "Description")
+    for x, t in zip(cols, ["No.", "Section", "Responsible", "Calcs", "Sheets"]):
+        c.drawString(x, y, t)
+    c.drawRightString(W - M, y, "Rev")
+    c.setStrokeColor(RULE)
     c.line(M, y - 5, W - M, y - 5)
     c.setFont("Helvetica", 9)
-    hist = issues_upto(ws.store, issue)[-8:]
-    for iss in reversed(hist):
-        y -= ROW
-        c.setFillColor(ACCENT if iss.id == issue.id else INK)
-        c.drawString(M, y, iss.label)
-        c.drawString(M + 52, y, iss.issued_on or "")
-        c.drawString(M + 140, y, _fit(iss.note or "", "Helvetica", 9, W - 2 * M - 140))
+    for s in spec.sections:
+        y -= ROW - 2
+        c.setFillColor(INK)
+        c.drawString(cols[0], y, str(s.number))
+        c.drawString(cols[1], y, _fit(s.pkg.title, "Helvetica", 9, 215))
+        c.drawString(cols[2], y, _fit(s.pkg.responsible or s.pkg.discipline, "Helvetica", 9, 120))
+        c.drawString(cols[3], y, str(len(s.docs)))
+        c.drawString(cols[4], y, f"{s.first_sheet}–{s.last_sheet}")
+        c.drawRightString(W - M, y, spec.pkg_revs.get(s.pkg.id, "—"))
 
-    # Engineer of record + stamp box
+    # Issue history (as much as fits above the signature block)
+    y -= 30
+    sig_top = M + 150
+    if y - 40 > sig_top:
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(M, y, "Issue history")
+        y -= 20
+        c.setFont("Helvetica-Bold", 8)
+        c.setFillColor(MUTED)
+        c.drawString(M, y, "Issue")
+        c.drawString(M + 52, y, "Date")
+        c.drawString(M + 130, y, "Description")
+        c.line(M, y - 5, W - M, y - 5)
+        c.setFont("Helvetica", 9)
+        for lab, d, note in reversed(spec.history):
+            if y - ROW < sig_top + 10:
+                break
+            y -= ROW - 2
+            cur = lab == spec.label
+            c.setFillColor(ACCENT if cur else INK)
+            c.drawString(M, y, lab)
+            c.drawString(M + 52, y, d or "")
+            c.drawString(M + 130, y, _fit(note or "", "Helvetica", 9, W - 2 * M - 130))
+
+    # Signature block + stamp
+    bw = (W - 2 * M - 160) / 3
+    top = M + 112
+    c.setFillColor(MUTED)
+    c.setFont("Helvetica-Bold", 8)
+    if p.engineer_of_record:
+        c.drawString(M, top + 22, f"ENGINEER OF RECORD   {p.engineer_of_record}")
+    for i, (role, label) in enumerate(SIGN_ROLES):
+        x = M + i * bw
+        info = p.signatures.get(role, {})
+        c.setStrokeColor(RULE)
+        c.rect(x, M + 20, bw - 8, top - M - 20, stroke=1, fill=0)
+        c.setFillColor(MUTED)
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(x + 8, top - 14, label.upper())
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(x + 8, top - 32, _fit(info.get("name", ""), "Helvetica-Bold", 10, bw - 24))
+        c.setStrokeColor(MUTED)
+        c.line(x + 8, M + 46, x + bw - 16, M + 46)
+        c.setFillColor(MUTED)
+        c.setFont("Helvetica", 7)
+        c.drawString(x + 8, M + 36, "Signature")
+        c.drawRightString(x + bw - 16, M + 36, f"Date  {info.get('date', '') or '________'}")
     c.setStrokeColor(RULE)
-    c.rect(W - M - 150, M + 20, 150, 120, stroke=1, fill=0)
+    c.rect(W - M - 150, M + 20, 150, top - M + 22, stroke=1, fill=0)
     c.setFont("Helvetica", 7.5)
     c.setFillColor(MUTED)
     c.drawCentredString(W - M - 75, M + 26, "Engineer's stamp")
-    if p.engineer_of_record:
-        c.setFillColor(MUTED)
-        c.setFont("Helvetica", 8)
-        c.drawString(M, M + 52, "ENGINEER OF RECORD")
-        c.setFillColor(INK)
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(M, M + 36, p.engineer_of_record)
     c.showPage()
 
 
-def _toc_rows(ws: Workspace, entries: list[Entry]) -> list[tuple]:
-    rows = []
-    for pkg in ws.project.packages:
-        es = [e for e in entries if e.doc.package == pkg.id]
-        if not es:
-            continue
-        rows.append(("pkg", pkg))
-        rows.extend(("doc", e) for e in es)
+def _toc_rows(spec: BookSpec) -> list[tuple]:
+    rows: list[tuple] = []
+    for s in spec.sections:
+        rows.append(("sec", s))
+        rows.extend(("doc", d) for d in s.docs)
     return rows
 
 
-def _draw_toc(c, ws, issue, rows, n_pages: int) -> None:
+def _draw_toc(c, ws, spec, rows, n_pages: int) -> None:
     for pg in range(n_pages):
-        y = _page_header(c, "Contents" + (" (cont.)" if pg else ""), ws, issue)
+        y = _page_header(c, "Contents" + (" (cont.)" if pg else ""), ws, spec)
         c.setFont("Helvetica-Bold", 8)
         c.setFillColor(MUTED)
-        c.drawString(M, y, "Document")
+        c.drawString(M, y, "Calculation")
         c.drawString(M + 300, y, "Pages")
         c.drawString(M + 345, y, "Status")
         c.drawRightString(W - M, y, "Sheet")
         y -= 8
         for kind, obj in rows[pg * ROWS_PER_PAGE:(pg + 1) * ROWS_PER_PAGE]:
             y -= ROW
-            if kind == "pkg":
+            if kind == "sec":
                 c.setFillColor(ACCENT)
                 c.setFont("Helvetica-Bold", 10)
-                c.drawString(M, y, _fit(f"{obj.id} — {obj.title}", "Helvetica-Bold", 10, W - 2 * M))
+                c.drawString(M, y, _fit(f"{obj.number}   {obj.pkg.title}", "Helvetica-Bold", 10, W - 2 * M - 40))
+                c.drawRightString(W - M, y, str(obj.first_sheet))
                 c.setStrokeColor(RULE)
                 c.line(M, y - 4, W - M, y - 4)
                 continue
-            e: Entry = obj
+            d: BookDoc = obj
+            c.setFillColor(MUTED)
+            c.setFont("Helvetica", 8.5)
+            c.drawString(M + 4, y, d.number)
             c.setFillColor(INK)
             c.setFont("Helvetica", 9)
-            c.drawString(M + 12, y, _fit(e.doc.title, "Helvetica", 9, 280))
+            c.drawString(M + 30, y, _fit(d.title, "Helvetica", 9, 262))
             c.setFillColor(MUTED)
-            c.drawString(M + 300, y, str(e.doc.n_pages))
-            lab, col = _status_label(e.status)
+            c.drawString(M + 300, y, str(d.n_pages))
+            lab, col = _status_label(d.status)
+            if spec.prev_label is None:
+                lab, col = "—", MUTED
             c.setFillColor(col)
-            c.setFont("Helvetica-Bold" if e.status != UNCHANGED else "Helvetica", 8)
+            c.setFont("Helvetica-Bold" if lab != "—" else "Helvetica", 8)
             c.drawString(M + 345, y, lab)
             c.setFillColor(INK)
             c.setFont("Helvetica", 9)
-            c.drawRightString(W - M, y, str(e.start))
-            # dotted leader
+            c.drawRightString(W - M, y, str(d.start))
             c.setStrokeColor(RULE)
             c.setDash(1, 2)
             c.line(M + 410, y + 2, W - M - 24, y + 2)
@@ -221,35 +372,31 @@ def _draw_toc(c, ws, issue, rows, n_pages: int) -> None:
         c.showPage()
 
 
-def _rev_rows(entries: list[Entry], removed: list[DocRecord]) -> list[tuple]:
-    rows: list[tuple] = [("doc", e) for e in entries if e.status in (NEW, REVISED)]
-    rows += [("removed", d) for d in removed]
+def _rev_rows(spec: BookSpec) -> list[tuple]:
+    rows: list[tuple] = [("doc", d) for d in spec.docs if d.status in (NEW, REVISED)]
+    rows += [("removed", r) for r in spec.removed]
     return rows
 
 
-def _draw_revsummary(c, ws, issue, prev: Issue | None, rows, n_pages: int) -> None:
+def _draw_revsummary(c, ws, spec, rows, n_pages: int) -> None:
     for pg in range(n_pages):
-        y = _page_header(c, "Revision summary" + (" (cont.)" if pg else ""), ws, issue)
+        y = _page_header(c, "Revision summary" + (" (cont.)" if pg else ""), ws, spec)
         c.setFont("Helvetica", 9.5)
         c.setFillColor(INK)
-        if prev is None:
-            c.drawString(M, y, f"Issue {issue.label} is the first issue — every sheet is new.")
-            c.showPage()
-            continue
         if pg == 0:
-            c.drawString(M, y, f"Changes from Issue {prev.label} ({prev.issued_on}) to Issue {issue.label} "
-                               f"({issue.issued_on}).")
+            target = "this draft" if spec.draft else f"Issue {spec.label} ({spec.issued_on})"
+            c.drawString(M, y, f"Changes from Issue {spec.prev_label} ({spec.prev_date}) to {target}.")
             y -= 14
             c.setFillColor(MUTED)
-            c.drawString(M, y, "Revised sheets carry a red revision tag (green for new) in the top-right corner. "
+            c.drawString(M, y, "Changed sheets carry a REVISED (red) or NEW (green) tag in the top-right corner. "
                                "Sheet numbers refer to this book.")
             y -= 10
         y -= 14
         c.setFont("Helvetica-Bold", 8)
         c.setFillColor(MUTED)
-        c.drawString(M, y, "Document")
+        c.drawString(M, y, "Calculation")
         c.drawString(M + 280, y, "Status")
-        c.drawString(M + 350, y, "Revised sheets")
+        c.drawString(M + 350, y, "Changed sheets")
         c.setStrokeColor(RULE)
         c.line(M, y - 5, W - M, y - 5)
         chunk = rows[pg * ROWS_PER_PAGE:(pg + 1) * ROWS_PER_PAGE]
@@ -257,32 +404,70 @@ def _draw_revsummary(c, ws, issue, prev: Issue | None, rows, n_pages: int) -> No
             y -= ROW
             c.setFont("Helvetica", 9)
             c.setFillColor(INK)
-            c.drawString(M, y, "No documents changed.")
+            c.drawString(M, y, "No calculations changed.")
         for kind, obj in chunk:
             y -= ROW
             c.setFont("Helvetica", 9)
             c.setFillColor(INK)
             if kind == "removed":
-                c.drawString(M, y, _fit(f"{obj.package} · {obj.title}", "Helvetica", 9, 270))
+                c.drawString(M, y, _fit(f"{obj[0]} · {obj[1]}", "Helvetica", 9, 270))
                 c.setFillColor(MUTED)
                 c.setFont("Helvetica-Bold", 8)
                 c.drawString(M + 280, y, "REMOVED")
                 c.setFont("Helvetica", 9)
-                c.drawString(M + 350, y, "withdrawn from this issue")
+                c.drawString(M + 350, y, "withdrawn")
                 continue
-            e: Entry = obj
-            c.drawString(M, y, _fit(f"{e.doc.package} · {e.doc.title}", "Helvetica", 9, 270))
-            lab, col = _status_label(e.status)
+            d: BookDoc = obj
+            c.drawString(M, y, _fit(f"{d.number}  {d.title}", "Helvetica", 9, 270))
+            lab, col = _status_label(d.status)
             c.setFillColor(col)
             c.setFont("Helvetica-Bold", 8)
             c.drawString(M + 280, y, lab)
             c.setFillColor(INK)
             c.setFont("Helvetica", 9)
-            sheets = compress_ranges([e.start + p - 1 for p in e.changed]) or "text unchanged"
+            sheets = compress_ranges([d.start + p - 1 for p in d.changed]) or "title block only"
             c.drawString(M + 350, y, _fit(sheets, "Helvetica", 9, W - M - (M + 350)))
         c.showPage()
 
 
+def _draw_section_title(c, ws, spec: BookSpec, s: BookSection) -> None:
+    _band(c)
+    c.setFillColor(TINT)
+    c.rect(0, H * 0.42, W, H * 0.36, stroke=0, fill=1)
+    c.setFillColor(ACCENT)
+    c.setFont("Helvetica-Bold", 72)
+    c.drawString(M, H * 0.42 + 150, f"{s.number}")
+    c.setFillColor(INK)
+    c.setFont("Helvetica-Bold", 26)
+    c.drawString(M, H * 0.42 + 105, _fit(s.pkg.title, "Helvetica-Bold", 26, W - 2 * M))
+    c.setFont("Helvetica", 10.5)
+    c.setFillColor(MUTED)
+    who = f"Responsible: {s.pkg.responsible}   ·   " if s.pkg.responsible else ""
+    c.drawString(M, H * 0.42 + 80, f"{who}Sheets {s.first_sheet}–{s.last_sheet}   ·   "
+                                  f"{len(s.docs)} calculation{'s' if len(s.docs) != 1 else ''}")
+    y = H * 0.42 - 34
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(M, y, "Calculation")
+    c.drawRightString(W - M, y, "Sheet")
+    c.setStrokeColor(RULE)
+    c.line(M, y - 5, W - M, y - 5)
+    for d in s.docs[:22]:
+        y -= ROW
+        c.setFillColor(MUTED)
+        c.setFont("Helvetica", 9)
+        c.drawString(M, y, d.number)
+        c.setFillColor(INK)
+        c.drawString(M + 30, y, _fit(d.title, "Helvetica", 9, W - 2 * M - 80))
+        c.drawRightString(W - M, y, str(d.start))
+    if len(s.docs) > 22:
+        y -= ROW
+        c.setFillColor(MUTED)
+        c.drawString(M + 30, y, f"… and {len(s.docs) - 22} more (see Contents)")
+    c.showPage()
+
+
+# --------------------------------------------------------------------------- #
+# Sheet stamping
 # --------------------------------------------------------------------------- #
 def _overlay(w: float, h: float, left: str, center: str, right: str, delta: str | None,
              delta_color=DELTA):
@@ -308,7 +493,7 @@ def _overlay(w: float, h: float, left: str, center: str, right: str, delta: str 
         c.setLineWidth(1)
         c.roundRect(x, y, tw, 15, 3, stroke=1, fill=1)
         c.setFillColor(delta_color)
-        p = c.beginPath()          # small triangle = revision delta
+        p = c.beginPath()
         p.moveTo(x + 5, y + 3.5)
         p.lineTo(x + 13, y + 3.5)
         p.lineTo(x + 9, y + 11.5)
@@ -330,82 +515,89 @@ def _stamp(page, left, center, right, delta=None, delta_color=DELTA) -> None:
     page.merge_transformed_page(ov, Transformation().translate(float(box.left), float(box.bottom)))
 
 
-def compile_issue(ws: Workspace, issue: Issue, out_path: Path, mark_changes: bool = True) -> dict:
-    prev = ws.store.previous(issue)
-    calc = lambda d: not ws.project.is_drawing_package(d.package)  # noqa: E731
-    prev_docs = {k: d for k, d in (ws.store.documents_by_key(prev) if prev else {}).items() if calc(d)}
-    docs = [d for d in ws.ordered_documents(issue) if calc(d)]
-    statuses = doc_statuses(prev_docs if prev else None, {d.doc_key: d for d in docs})
-    removed = [d for k, d in prev_docs.items() if statuses.get(k) == REMOVED]
-
-    entries = []
-    for d in docs:
-        st = statuses[d.doc_key]
-        old_hashes = ws.hashes(prev_docs[d.doc_key]) if d.doc_key in prev_docs else None
-        ch = changed_pages(old_hashes, ws.hashes(d)) if st in (NEW, REVISED) else []
-        if st == NEW and prev is None:
-            ch = []                         # first issue: no delta tags
-        entries.append(Entry(d, st, ch))
-
-    toc = _toc_rows(ws, entries)
-    rev = _rev_rows(entries, removed) if prev else []
+# --------------------------------------------------------------------------- #
+def build_book(ws: Workspace, spec: BookSpec, out_path: Path, mark_changes: bool = True) -> dict:
+    toc = _toc_rows(spec)
+    rev = _rev_rows(spec) if spec.prev_label else []
     n_toc = max(1, math.ceil(len(toc) / ROWS_PER_PAGE))
-    n_rev = max(1, math.ceil(len(rev) / ROWS_PER_PAGE))
+    n_rev = math.ceil(max(1, len(rev)) / ROWS_PER_PAGE) if spec.prev_label else 0
     front = 1 + n_toc + n_rev
+
     sheet = front + 1
-    for e in entries:
-        e.start = sheet
-        sheet += e.doc.n_pages
+    for s in spec.sections:
+        if s.pkg.title_page:
+            s.title_sheet = sheet
+            sheet += 1
+        for d in s.docs:
+            d.start = sheet
+            sheet += d.n_pages
     total = sheet - 1
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
-    c.setTitle(f"{ws.project.name} — Structural Calculations, Issue {issue.label}")
-    c.setAuthor(ws.project.engineer_of_record or "")
-    _draw_cover(c, ws, issue, entries, total)
-    _draw_toc(c, ws, issue, toc, n_toc)
-    _draw_revsummary(c, ws, issue, prev, rev, n_rev)
+    _draw_cover(c, ws, spec, total)
+    _draw_toc(c, ws, spec, toc, n_toc)
+    if n_rev:
+        _draw_revsummary(c, ws, spec, rev, n_rev)
+    for s in spec.sections:
+        if s.title_sheet:
+            _draw_section_title(c, ws, spec, s)
     c.save()
     buf.seek(0)
+    generated = PdfReader(buf).pages
+    title_pages = {s.pkg.id: generated[front + i]
+                   for i, s in enumerate([s for s in spec.sections if s.title_sheet])}
 
-    writer = PdfWriter()
+    tag = "DRAFT" if spec.draft else f"Issue {spec.label}"
     left = f"{ws.project.number}  {ws.project.name}".strip()
-    for i, page in enumerate(PdfReader(buf).pages):
-        wp = writer.add_page(page)
-        _stamp(wp, left, "Front matter", f"Issue {issue.label}  ·  Sheet {i + 1} of {total}")
+    writer = PdfWriter()
+    for i in range(front):
+        wp = writer.add_page(generated[i])
+        _stamp(wp, left, "Front matter", f"{tag}  ·  Sheet {i + 1} of {total}")
     writer.add_outline_item("Cover", 0)
     writer.add_outline_item("Contents", 1)
-    writer.add_outline_item("Revision summary", 1 + n_toc)
+    if n_rev:
+        writer.add_outline_item("Revision summary", 1 + n_toc)
 
-    pkg_nodes = {}
-    for e in entries:
-        reader = PdfReader(str(ws.store.archived_file(e.doc)))
-        changed = set(e.changed) if mark_changes else set()
-        for pno, page in enumerate(reader.pages, start=1):
-            wp = writer.add_page(page)
-            n = e.start + pno - 1
-            delta, col = None, DELTA
-            if pno in changed:
-                delta = f"{issue.label}  {'NEW' if e.status == NEW else 'REVISED'}"
-                col = NEW_C if e.status == NEW else DELTA
-            _stamp(wp, left, f"{e.doc.package} · {e.doc.title}",
-                   f"Issue {issue.label}  ·  Sheet {n} of {total}", delta, col)
-        if e.doc.package not in pkg_nodes:
-            pkg = ws.project.package(e.doc.package)
-            pkg_nodes[e.doc.package] = writer.add_outline_item(
-                f"{e.doc.package} — {pkg.title if pkg else ''}", e.start - 1)
-        writer.add_outline_item(e.doc.title, e.start - 1, parent=pkg_nodes[e.doc.package])
+    for s in spec.sections:
+        if s.title_sheet:
+            wp = writer.add_page(title_pages[s.pkg.id])
+            _stamp(wp, left, f"Section {s.number} · {s.pkg.title}", f"{tag}  ·  Sheet {s.title_sheet} of {total}")
+        for d in s.docs:
+            reader = PdfReader(str(d.path))
+            changed = set(d.changed) if mark_changes else set()
+            for pno, page in enumerate(reader.pages, start=1):
+                wp = writer.add_page(page)
+                delta, col = None, DELTA
+                if pno in changed:
+                    word = "NEW" if d.status == NEW else "REVISED"
+                    delta = f"{'DRAFT' if spec.draft else spec.label}  {word}"
+                    col = NEW_C if d.status == NEW else DELTA
+                _stamp(wp, left, f"{d.number}  {d.title}",
+                       f"{tag}  ·  Sheet {d.start + pno - 1} of {total}", delta, col)
+        # bookmarks once the section's pages exist in the writer
+        node = writer.add_outline_item(f"{s.number}  {s.pkg.title}", s.first_sheet - 1)
+        for d in s.docs:
+            writer.add_outline_item(f"{d.number}  {d.title}", d.start - 1, parent=node)
 
-    writer.add_metadata({"/Title": f"{ws.project.name} — Structural Calculations, Issue {issue.label}",
-                         "/Author": ws.project.engineer_of_record or "",
-                         "/Subject": f"Project {ws.project.number}", "/Creator": "calcbook"})
+    title = f"{ws.project.name} — Structural Calculations, {tag}"
+    writer.add_metadata({"/Title": title, "/Author": ws.project.engineer_of_record or "",
+                         "/Subject": f"Project {ws.project.number}", "/Creator": "AEC Content Manager"})
     writer.page_mode = "/UseOutlines"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "wb") as fh:
         writer.write(fh)
-
     return {
-        "path": out_path, "sheets": total, "documents": len(entries), "front_matter": front,
-        "revised_sheets": sum(len(e.changed) for e in entries if e.status in (NEW, REVISED)),
-        "removed": len(removed),
+        "path": out_path, "sheets": total, "documents": len(spec.docs), "sections": len(spec.sections),
+        "front_matter": front,
+        "revised_sheets": sum(len(d.changed) for d in spec.docs),
+        "removed": len(spec.removed),
     }
+
+
+def compile_issue(ws: Workspace, issue: Issue, out_path: Path, mark_changes: bool = True) -> dict:
+    return build_book(ws, spec_from_issue(ws, issue), out_path, mark_changes)
+
+
+def compile_draft(ws: Workspace, out_path: Path) -> dict:
+    return build_book(ws, spec_from_working(ws), out_path)

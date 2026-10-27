@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><div><h1>QA reviews</h1>
+  <div class="sub">Who checked and approved each calculation{% if latest %} in Issue {{ latest.label }}{% endif %}, with the full review history.</div></div></div>
+{% if not latest %}<div class="card empty">Record an issue first; reviews are logged against issued calculations.</div>{% else %}
+<div class="row" style="margin-bottom:14px">
+  {% for k, v in counts.items() %}<span class="pill {{ k|replace(' ', '-') }}">{{ v }} {{ k }}</span>{% endfor %}
+</div>
+<form method="post" action="{{ url_for('qa_add', slug=g.slug) }}">
+<div class="card scroll"><table>
+  <thead><tr><th style="width:28px"><input type="checkbox" id="all" aria-label="Select all"></th><th>Document</th><th>Status</th><th>Last action</th><th>History</th></tr></thead>
+  <tbody>{% for d in docs %}{% set e = status.get(d.doc_key) %}{% set st = qa_status[e.action] if e else 'not started' %}
+  <tr id="qa-{{ loop.index }}">
+    <td><input type="checkbox" name="doc_key" value="{{ d.doc_key }}" {{ 'checked' if focus == d.doc_key }} aria-label="Select {{ d.title }}"></td>
+    <td><b>{{ d.title }}</b><div class="muted small mono">{{ d.doc_key }}</div></td>
+    <td><span class="pill {{ st|replace(' ', '-') }}">{{ st }}</span></td>
+    <td class="small">{% if e %}{{ e.action_label }} · <b>{{ e.person }}</b> · <span class="muted">{{ e.created[:10] }}</span>{% if e.comment %}<div class="muted">“{{ e.comment }}”</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="small muted">{% set n = entries|selectattr('doc_key', 'equalto', d.doc_key)|list|length %}{{ n }} {{ 'entry' if n == 1 else 'entries' }}</td>
+  </tr>{% endfor %}</tbody></table></div>
+
+<div class="card pad" style="margin-top:14px">
+  <h3 style="margin-bottom:10px">Record a review for the selected calculations</h3>
+  <div class="row">
+    <label class="field">Action<select class="in" name="action" id="qa-action">{% for k, v in actions.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+    <label class="field">Reviewer<input type="text" name="person" id="qa-person" placeholder="Your name" required></label>
+    <label class="field" style="flex:1;min-width:240px">Comment<input type="text" name="comment" id="qa-comment" placeholder="e.g. Check deflection limit for lab vibration"></label>
+    <button class="btn primary" style="align-self:flex-end">Record</button>
+  </div>
+</div>
+</form>
+
+<h2>Review history</h2>
+<div class="card scroll"><table>
+  <thead><tr><th>When</th><th>Document</th><th>Issue</th><th>Action</th><th>By</th><th>Comment</th></tr></thead><tbody>
+  {% for e in entries %}<tr><td class="mono small date">{{ e.created[:16]|replace('T', ' ') }}</td><td class="mono small">{{ e.doc_key }}</td>
+    <td class="mono">{{ e.issue_label }}</td><td><span class="pill {{ qa_status[e.action]|replace(' ', '-') }}">{{ e.action_label }}</span></td>
+    <td>{{ e.person }}</td><td>{{ e.comment }}</td></tr>
+  {% else %}<tr><td colspan="6" class="empty">No reviews yet.</td></tr>{% endfor %}</tbody></table></div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>
+var all=document.getElementById('all'); if(all) all.onchange=function(){ document.querySelectorAll('input[name=doc_key]').forEach(function(c){c.checked=all.checked;}); };
+</script>{% endblock %}

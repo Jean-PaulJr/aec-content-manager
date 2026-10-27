@@ -77,7 +77,7 @@ def test_revision_diff(demo):
     d = compare(demo, a, b)
     calcs = [c for c in d.changes if c.package != "DWG"]
     assert {s: sum(c.status == s for c in calcs) for s in ("new", "revised", "removed", "unchanged")} == \
-        {"new": 1, "revised": 3, "removed": 1, "unchanged": 5}
+        {"new": 2, "revised": 3, "removed": 1, "unchanged": 5}     # FDN-02 + scanned FDN-04
     beams = next(c for c in d.changes if c.doc_key == "GRV/GRV-02_Floor_Beams")
     assert beams.changed_pages == [1, 3]           # page 2 only had title-block changes
     assert ("B-12", "W16X31", "W18X35") in beams.member_changes
@@ -102,13 +102,81 @@ def test_design_intent_checks(demo):
 
 
 def test_compiled_book(demo):
-    out = demo.project.output_dir / "2026-014_Calculations_Issue-B.pdf"
+    from calcbook.compile import compile_issue
+    out = demo.project.output_dir / "book_B.pdf"
+    info = compile_issue(demo, demo.store.resolve("B"), out)
     r = PdfReader(str(out))
-    assert len(r.pages) == 14
-    titles = [o.title for o in r.outline if not isinstance(o, list)]
-    assert titles[:3] == ["Cover", "Contents", "Revision summary"]
-    assert "Sheet 14 of 14" in r.pages[-1].extract_text()
-    assert "REVISED" in r.pages[4].extract_text()      # GRV-02 sheet 1 carries a delta tag
+    assert len(r.pages) == info["sheets"]
+    top = [o.title for o in r.outline if not isinstance(o, list)]
+    assert top[:3] == ["Cover", "Contents", "Revision summary"]
+    assert top[3:] == ["1  Gravity Framing", "2  Lateral System", "3  Foundations", "4  Steel Connections"]
+    assert f"Sheet {info['sheets']} of {info['sheets']}" in r.pages[-1].extract_text()
+    beams = r.pages[5].extract_text()                    # 1.2 GRV-02 sheet 1, after section title page
+    assert "GRV-02" in beams and "REVISED" in beams
+    assert "Gravity Framing" in r.pages[3].extract_text()  # section title page
+
+
+def test_report_package_builder(tmp_path):
+    from calcbook.compile import compile_draft
+    from calcbook.demo import calc_pdf
+    from calcbook.projects import (Home, add_section, number_working, remove_section, save_upload,
+                                   set_order, update_section, working_files)
+    home = Home(tmp_path)
+    slug = home.create("Builder Test", template="wood-multifamily")
+    ws = home.open(slug)
+    assert [p.id for p in ws.project.packages][:3] == ["CRIT", "FRM", "SW"]
+    for name in ("A-01_Loads.pdf", "A-03_Joists.pdf"):
+        f = tmp_path / name
+        calc_pdf(f, name[:4], name, "me", "A", [["LL = 40 psf"]])
+        save_upload(ws.project, "FRM", name, f.read_bytes())
+    f = tmp_path / "A-02_Beams.pdf"
+    calc_pdf(f, "A-02", "Beams", "me", "A", [["p1"], ["p2"]])
+    ws = home.open(slug)
+    save_upload(ws.project, "FRM", f.name, f.read_bytes(), position="after:A-01_Loads")
+    ws = home.open(slug)
+    files, _ = working_files(ws)
+    assert [x.name for x in files["FRM"]] == ["A-01_Loads", "A-02_Beams", "A-03_Joists"]
+    n = number_working(ws.project, files, False)
+    assert [x.start for x in files["FRM"]] == [4, 5, 7]   # cover, contents, section title page
+    set_order(ws.project, "FRM", ["A-03_Joists", "A-01_Loads", "A-02_Beams"])
+    update_section(ws.project, "SW", include=False)
+    sid = add_section(ws.project, "Elevator Pit")
+    ws = home.open(slug)
+    assert ws.project.package(sid).path.exists()
+    remove_section(ws.project, "HD")
+    ws = home.open(slug)
+    assert ws.project.package("HD") is None and not ws.project.package("SW").include
+    info = compile_draft(ws, tmp_path / "draft.pdf")
+    r = PdfReader(str(tmp_path / "draft.pdf"))
+    assert len(r.pages) == info["sheets"] == n["total"]
+    sec = [o for o in r.outline if isinstance(o, list)][0]
+    titles = [o.title for o in sec]
+    assert [t[:3] for t in titles] == ["1.1", "1.2", "1.3"]
+    assert "Joists" in titles[0] and "Loads" in titles[1] and "Beams" in titles[2]
+    # images of hand calcs become PDF pages
+    from PIL import Image
+    import io
+    buf = io.BytesIO()
+    Image.new("RGB", (400, 500), "white").save(buf, "PNG")
+    name, _ = save_upload(ws.project, "FDN", "hand calc.png", buf.getvalue())
+    assert name.endswith(".pdf")
+
+
+def test_tracker(tmp_path):
+    from calcbook.tracker import Tracker
+    from calcbook.store import Store
+    tr = Tracker(Store(tmp_path))
+    rid = tr.save_rfi({"subject": "Beam penetration", "due_on": "2020-01-01"})
+    assert tr.rfis()[0]["number"] == "RFI-001" and tr.rfis()[0]["overdue"]
+    tr.save_rfi({"subject": "Beam penetration", "status": "answered", "number": "RFI-001"}, rid)
+    assert not tr.rfis()[0]["overdue"] and tr.rfis()[0]["answered_on"]
+    tr.save_submittal({"title": "Steel shop drawings", "status": "approved"})
+    assert tr.submittals()[0]["returned_on"]
+    tr.add_qa("GRV/X", "A", "approved", "M. Okafor", "")
+    assert tr.qa_status()["GRV/X"].action == "approved"
+    with pytest.raises(ValueError):
+        tr.add_qa("GRV/X", "A", "approved", "", "")
+    assert len(tr.events()) == 4
 
 
 def test_drawing_changes(demo):
@@ -141,9 +209,17 @@ def test_web_app(tmp_path):
                content_type="multipart/form-data")
     assert r.status_code == 302                                  # rejected with a flash, no crash
     assert c.post(f"/p/{slug}/issue", data={"label": "A", "note": "first"}).status_code == 302
-    for page in ("", "/documents", "/findings", "/changes", "/drawings", "/register", "/settings"):
+    for page in ("", "/documents", "/findings", "/changes", "/drawings", "/register", "/settings",
+                 "/qa", "/rfis", "/submittals", "/info"):
         assert c.get(f"/p/{slug}{page}").status_code == 200, page
     assert c.get(f"/p/{slug}/download/book").status_code == 200
+    assert c.get(f"/p/{slug}/download/draft").status_code == 200
+    assert c.post(f"/p/{slug}/rfis", data={"subject": "Opening in B-12"}).status_code == 302
+    assert b"Opening in B-12" in c.get(f"/p/{slug}/rfis").data
+    assert c.post(f"/p/{slug}/order", json={"sections": ["LAT", "CRIT"]}).get_json()["ok"]
+    assert c.post(f"/p/{slug}/info", data={"name": "Pier 70 Garage", "phase": "Construction",
+                                           "ms_name": ["Pour"], "ms_due": ["2027-01-01"]}).status_code == 302
+    assert b"Construction" in c.get(f"/p/{slug}").data
     assert c.get("/p/nope/findings").status_code == 404
     # two projects side by side
     c.post("/projects", data={"name": "Second Job"})

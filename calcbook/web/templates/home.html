@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="top"><div><h1>Projects</h1><div class="sub">Each project keeps its own documents, issues and design basis.</div></div>
+<div class="top"><div><h1>Projects</h1><div class="sub">Each project keeps its own calcs, drawings, issues, reviews, RFIs and submittals.</div></div>
   <form method="post" action="{{ url_for('demo') }}"><button class="btn">Load demo project</button></form>
 </div>
 {% if cards %}
@@ -16,6 +16,7 @@
     <div class="meta">
       <span>{{ c.p.packages|length }} packages</span>
       <span>{{ c.docs }} documents</span>
+      <span>{{ c.p.phase }}</span>
       <span>{% if c.latest %}Issue {{ c.latest.label }} · {{ c.latest.issued_on }}{% else %}not issued yet{% endif %}</span>
     </div>
     {% if c.c %}<div class="row small">
@@ -32,13 +33,17 @@
 <h2>New project</h2>
 <form class="card pad" method="post" action="{{ url_for('create_project') }}">
   <div class="grid g4">
-    <label class="field">Project name<input type="text" name="name" required placeholder="Pier 70 Parking Structure"></label>
-    <label class="field">Project number<input type="text" name="number" placeholder="2026-021"></label>
-    <label class="field">Client<input type="text" name="client"></label>
-    <label class="field">Engineer of record<input type="text" name="eor"></label>
+    <label class="field">Project name<input type="text" name="name" id="np-name" required placeholder="Pier 70 Parking Structure"></label>
+    <label class="field">Project number<input type="text" name="number" id="np-number" placeholder="2026-021"></label>
+    <label class="field">Client<input type="text" name="client" id="np-client"></label>
+    <label class="field">Address<input type="text" name="address" id="np-address"></label>
+    <label class="field">Engineer of record<input type="text" name="eor" id="np-eor"></label>
+    <label class="field">Phase<select class="in" name="phase" id="np-phase">{% for ph in PHASES %}<option {{ 'selected' if ph == 'Design Development' }}>{{ ph }}</option>{% endfor %}</select></label>
+    <label class="field" style="grid-column:span 2">Package template<select class="in" name="template" id="np-template">
+      {% for key, t in templates.items() %}<option value="{{ key }}">{{ t.name }}{{ '' if t.builtin else ' (yours)' }} — {{ t.sections|map(attribute='title')|join(', ') }}</option>{% endfor %}</select></label>
   </div>
   <div class="row" style="margin-top:12px">
-    <span class="muted small">Starts with Gravity, Lateral, Foundations and a Structural Drawings set — change them in Settings.</span>
+    <span class="muted small">Creates the section folders from the template. Add, remove or reorder sections later in Report package.</span>
     <span class="spacer"></span><button class="btn primary">Create project</button>
   </div>
 </form>

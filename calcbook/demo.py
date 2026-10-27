@@ -35,6 +35,18 @@ project:
   number: "2026-014"
   client: "Bayfront Science Partners"
   engineer_of_record: "J. Rivera, S.E."
+  address: "1550 Owens St, San Francisco, CA"
+  phase: Permitting
+  milestones:
+    - {name: Design Development, due: "2026-06-30", done: true}
+    - {name: 50% Construction Documents, due: "2026-08-14", done: true}
+    - {name: Permit submittal, due: "2026-10-23", done: true}
+    - {name: Plan check response 1, due: "2026-12-04", done: false}
+    - {name: Construction start, due: "2027-03-01", done: false}
+  signatures:
+    prepared_by: {name: "A. Chen, P.E.", date: "2026-10-22"}
+    checked_by: {name: "M. Okafor, P.E.", date: "2026-10-23"}
+    approved_by: {name: "J. Rivera, S.E.", date: ""}
 
 packages:
   - id: GRV
@@ -390,6 +402,77 @@ def drawing_set(path: Path, sheets: list[str], rev: str) -> None:
     c.save()
 
 
+def hand_calc(path: Path) -> None:
+    """A scanned-looking hand calc (image only, no text layer)."""
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+    from .projects import image_to_pdf
+    img = Image.new("L", (1700, 2200), 246)
+    d = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 42)
+    except OSError:
+        font = ImageFont.load_default()
+    for y in range(160, 2200, 64):                   # engineering pad grid
+        d.line((80, y, 1620, y), fill=225, width=2)
+    lines = ["ANCHOR BOLTS - BRACED FRAME BASE   BY: P.SHAH", "",
+             "Tu = 46.2 k   Vu = 18.5 k  (per LAT-03)",
+             "(4) 1\" dia F1554 Gr 55,  hef = 18 in", "f'c = 4000 psi", "",
+             "phiNcbg = 61.4 k   DCR = 0.75  OK", "phiVcbg = 29.0 k   DCR = 0.64  OK"]
+    for i, ln in enumerate(lines):
+        d.text((110, 180 + 64 * i), ln, fill=30, font=font)
+    img = img.rotate(0.6, fillcolor=246).filter(ImageFilter.GaussianBlur(0.8))
+    buf = __import__("io").BytesIO()
+    img.save(buf, "PNG")
+    path.write_bytes(image_to_pdf(buf.getvalue()))
+
+
+def seed_logs(target: Path) -> None:
+    from .projects import open_workspace
+    from .tracker import Tracker
+    ws = open_workspace(target / "project.yaml")
+    tr = Tracker(ws.store)
+    tr.log("issue", "A", "Issue A recorded — 50% Construction Documents")
+    tr.log("issue", "B", "Issue B recorded — Permit submittal")
+    for key, action, who, note in [
+        ("GRV/GRV-01_Design_Criteria", "approved", "M. Okafor", ""),
+        ("GRV/GRV-02_Floor_Beams", "checked", "M. Okafor", "B-12 upsize checked against equipment loads"),
+        ("GRV/GRV-03_Columns", "returned", "M. Okafor", "C-3 interaction 1.04 > 1.0 — upsize or justify"),
+        ("LAT/LAT-01_Seismic_Base_Shear", "returned", "A. Chen", "SDS should be 1.20 per geotech GR-114"),
+        ("FDN/FDN-01_Spread_Footings", "submitted", "P. Shah", ""),
+        ("CONN/CONN-01_Beam_Connections", "comment", "A. Chen", "Update B-12 connection for W18X35"),
+    ]:
+        tr.add_qa(key, "B", action, who, note)
+    tr.save_rfi({"number": "RFI-001", "subject": "Lab exhaust duct penetration through beam B-12",
+                 "question": "Mechanical requests a 10 in round opening in B-12 web at midspan. Acceptable?",
+                 "status": "answered", "raised_by": "Bayside Builders", "assigned_to": "J. Rivera",
+                 "sent_on": "2026-09-02", "due_on": "2026-09-09", "answered_on": "2026-09-08",
+                 "answer": "Acceptable with web stiffener plates per detail 7/S-501.", "docs": "S-201, GRV-02",
+                 "impact": "Drawing revision needed"})
+    tr.save_rfi({"number": "RFI-002", "subject": "Footing F-1 at grid D/4 conflicts with storm drain",
+                 "question": "Storm drain invert is 2 ft above bottom of footing at D/4. Can footing step?",
+                 "status": "open", "raised_by": "Bayside Builders", "assigned_to": "P. Shah",
+                 "sent_on": "2026-10-14", "due_on": "2026-10-21", "docs": "S-101, FDN-01",
+                 "impact": "Calc revision needed"})
+    tr.save_rfi({"number": "RFI-003", "subject": "Deck attachment at equipment platform",
+                 "status": "open", "raised_by": "Steel fabricator", "assigned_to": "A. Chen",
+                 "sent_on": "2026-10-24", "due_on": "2026-11-03", "docs": "S-201"})
+    tr.save_submittal({"number": "SUB-001", "spec_section": "05 12 00", "title": "Structural steel shop drawings — Level 2",
+                       "contractor": "Golden Gate Steel", "status": "revise and resubmit", "revision": "0",
+                       "received_on": "2026-09-15", "due_on": "2026-09-29", "returned_on": "2026-09-28",
+                       "reviewer": "A. Chen", "notes": "B-12 shown as W16X31; revise to W18X35 per Issue B."})
+    tr.save_submittal({"number": "SUB-001", "spec_section": "05 12 00", "title": "Structural steel shop drawings — Level 2",
+                       "contractor": "Golden Gate Steel", "status": "under review", "revision": "1",
+                       "received_on": "2026-10-20", "due_on": "2026-11-03", "reviewer": "A. Chen"})
+    tr.save_submittal({"number": "SUB-002", "spec_section": "03 30 00", "title": "Concrete mix designs",
+                       "contractor": "Bay Ready Mix", "status": "approved as noted", "revision": "0",
+                       "received_on": "2026-09-01", "due_on": "2026-09-15", "returned_on": "2026-09-12",
+                       "reviewer": "P. Shah", "notes": "Slab-on-grade mix must be 4000 psi minimum."})
+    tr.save_submittal({"number": "SUB-003", "spec_section": "05 05 19", "title": "Post-installed anchors — ICC-ES reports",
+                       "contractor": "Bayside Builders", "status": "received", "revision": "0",
+                       "received_on": "2026-10-10", "due_on": "2026-10-24", "reviewer": "P. Shah"})
+
+
 PACKAGES = ["gravity", "lateral", "foundations", "connections"]
 
 
@@ -424,7 +507,9 @@ def build(target: Path, quiet: bool = False, outputs: bool = True) -> Path:
     (dw / "Structural_Set_RevA.pdf").unlink()
     drawing_set(dw / "S-001_General_Notes_RevB.pdf", ["S-001"], "B")
     drawing_set(dw / "S-100_Plans_RevB.pdf", ["S-101", "S-201"], "B")
+    hand_calc(pk / "foundations/FDN-04_Anchor_Bolts_Hand_Calc.pdf")
     run("ingest", "B", "--note", "Permit submittal - revised per lab equipment", "--date", "2026-10-23")
+    seed_logs(target)
 
     if outputs:
         run("check", "--fail-on", "never")
