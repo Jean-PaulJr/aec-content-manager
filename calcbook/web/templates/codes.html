@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><div><h1>Codes &amp; assumptions</h1>
+  <div class="sub">Switch the adopted edition of any code. Every document is re-checked against it at once, documents that now cite a different edition are flagged, and the change is opened in the change register.</div></div>
+  <a class="btn" href="{{ url_for('findings', slug=g.slug, basis='working') }}">Design intent →</a></div>
+
+{% if impact %}{% set r = impact.row %}
+<div class="impact" role="status">
+  <h3>{{ impact.family }} {% if r.adopted %}is now {{ label(impact.family, r.adopted) }}{% else %}is no longer adopted{% endif %}</h3>
+  {% if impact.docs %}
+  <p style="margin:6px 0 8px">{{ impact.docs|length }} citation(s) no longer match and need revising or confirming:</p>
+  <ul style="margin:0 0 8px;padding-left:18px">{% for k, t, pg, cited in impact.docs %}
+    <li><b>{{ t }}</b> <span class="mono small muted">{{ k }} p.{{ ranges(pg) }}</span> cites <span class="mono">{{ cited }}</span></li>{% endfor %}</ul>
+  {% else %}<p style="margin:6px 0 8px">No document cites a different edition.</p>{% endif %}
+  <div class="row small"><a href="{{ url_for('change_register', slug=g.slug) }}">Change register →</a>
+    <a href="{{ url_for('findings', slug=g.slug, basis='working') }}">Re-checked findings →</a></div>
+</div>
+{% endif %}
+
+{% if not latest %}<div class="card empty">Record an issue to see which documents cite which codes. You can still choose the adopted editions below.</div>{% endif %}
+
+<div class="card">
+{% for r in rows %}
+<div class="code-row {{ 'flash-row' if changed == r.family }}" id="code-{{ r.family|lower|replace(' ', '-') }}">
+  <div>
+    <div class="code-name">{{ r.family }}</div>
+    <div class="mono small">{{ label(r.family, r.adopted) if r.adopted else 'not adopted' }}</div>
+    {% if latest and r.issued != r.adopted %}<span class="pill warning" title="Differs from Issue {{ latest.label }}">changed since {{ latest.label }}</span>{% endif %}
+    {% if r.stale %}<div><span class="pill error">{{ r.stale }} to update</span></div>{% endif %}
+  </div>
+  <div class="grid" style="gap:8px">
+    <form method="post" action="{{ url_for('codes_save', slug=g.slug) }}" class="row" style="gap:8px">
+      <input type="hidden" name="family" value="{{ r.family }}">
+      <div class="seg" role="group" aria-label="Adopted edition of {{ r.family }}">
+        {% for ed in r.editions %}{% set cited = r.cites|selectattr('edition', 'equalto', ed)|list %}
+        <button name="edition" value="{{ ed }}" aria-pressed="{{ 'true' if ed == r.adopted else 'false' }}" class="{{ 'cited' if cited }}"
+                title="{{ 'Cited in ' ~ cited[0].locations|length ~ ' document(s)' if cited else 'Not cited' }}">{{ label(r.family, ed) }}</button>{% endfor %}
+        <button name="edition" value="none" aria-pressed="{{ 'true' if not r.adopted else 'false' }}">None</button>
+      </div>
+    </form>
+    {% for c in r.cites %}
+      {% for k, t, pg in c.locations %}
+      <div class="cite {{ 'bad' if c.status == 'different edition' }}">
+        {% if c.status == 'adopted' %}<span class="pill approved">✓ matches</span>
+        {% elif c.status == 'different edition' %}<span class="pill error">update to {{ label(r.family, r.adopted) }}</span>
+        {% else %}<span class="pill withdrawn">not adopted</span>{% endif %}
+        <span class="mono">{{ c.label }}</span><span>{{ t }}</span><span class="muted mono small">{{ k }} p.{{ ranges(pg) }}</span>
+      </div>{% endfor %}
+    {% else %}{% if latest %}<div class="muted small">Not cited in Issue {{ latest.label }}.</div>{% endif %}{% endfor %}
+  </div>
+</div>
+{% endfor %}
+</div>
+
+<h2 id="assumptions">Assumptions</h2>
+<div class="grid g2" style="align-items:start">
+  <form class="card pad grid" method="post" action="{{ url_for('assumptions_save', slug=g.slug) }}" style="gap:10px">
+    <h3>Project assumptions</h3>
+    <div class="muted small" style="margin-top:-6px">One per line. Saved in the design basis and printed in every calc book.</div>
+    <textarea name="text" id="assumptions-text" rows="8" style="font-family:inherit">{{ basis_assumptions|join('\n') }}</textarea>
+    <div class="row"><span class="spacer"></span><button class="btn primary sm">Save assumptions</button></div>
+  </form>
+  <div class="card">
+    <div class="pad" style="padding-bottom:6px"><h3>Assumptions stated in the documents</h3>
+      <div class="muted small">Lines that start with “Assume…” and items under an ASSUMPTIONS heading.</div></div>
+    {% for a in assumptions if a.doc_key %}
+    <div class="assume"><span class="tag-assume">Assumption</span><span>{{ a.text }}</span>
+      <span class="muted small mono">{{ a.doc_key }} p.{{ a.page }}</span></div>
+    {% else %}<div class="empty">None found in Issue {{ latest.label if latest else '' }}.</div>{% endfor %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script>
+(function(){ var r=document.querySelector('.flash-row'); if(r) r.scrollIntoView({block:'center'}); })();
+</script>{% endblock %}

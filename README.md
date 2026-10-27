@@ -1,6 +1,8 @@
-# AEC Content Manager
+# BigDelta
 
-Project management for structural engineers, built in Python and run as a local web app. It compiles calculation packages, tracks every revision of calcs and drawings, checks that design intent is followed, and keeps the project's QA reviews, RFIs and submittals in one place from planning through construction.
+<img src="calcbook/web/static/icon-192.png" width="72" alt="BigDelta logo">
+
+BigDelta is project management for structural engineers, built in Python and run as a local web app. It compiles calculation packages, tracks every revision of calcs and drawings, checks that design intent is followed, and keeps the project's QA reviews, RFIs and submittals in one place from planning through construction.
 
 | Goal | Where |
 |---|---|
@@ -17,6 +19,15 @@ Project management for structural engineers, built in Python and run as a local 
 | Any calc software's output | PDFs from RISA, ENERCALC, Mathcad, Excel…; photos or scans of hand calcs (JPG/PNG/TIFF) are converted to PDF and read with OCR when Tesseract is installed |
 | Save to the company server | Point `--workspace` at a mapped drive or UNC path |
 | Templates | Built-in package templates, plus **Save as template** from any project |
+| Cite all code use | **Codes & assumptions**: every code and edition cited, where; switch the adopted edition and every affected document is flagged and opened in the change register |
+| Assumptions visibly clear | Project assumptions plus every "Assume…" line and ASSUMPTIONS list found in calcs; printed in each book |
+| Engineer comments for later education | **Engineering log**: changes, issues, decisions, lessons learned, plan check notes |
+| Design changes resolved down to calcs and drawings | **Change register**: design-criteria and code changes open automatically; items close when the document is revised |
+| Latest revisions and congruency (V3 drawings reference V3 specs) | Stale-reference check on calcs, drawings and specifications |
+| Linked contents and live page references | Contents, cover and summary rows are links; "per LAT-03" in a calc is stamped with LAT-03's current sheet and linked |
+| Specifications, plan check comments | Section kinds: calcs, drawings, specs, other documents |
+| Logo on every platform | Generated SVG, ICO, PNG and web manifest, embedded in the app and on the book cover |
+| TDD | `pytest` suite; every brief item has a test named after it in `tests/test_bigdelta.py` |
 
 ## Install
 

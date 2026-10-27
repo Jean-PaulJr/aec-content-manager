@@ -10,6 +10,8 @@ from .rules import RuleSet, parse_code_name
 from .units import fmt, parse_quantity
 
 
+KINDS = {"calcs": "Calculations", "drawings": "Drawing set", "specs": "Specifications",
+         "docs": "Other documents"}
 PHASES = ["Planning", "Schematic Design", "Design Development", "Construction Documents",
           "Permitting", "Bidding", "Construction", "Closeout"]
 SIGN_ROLES = [("prepared_by", "Prepared by"), ("checked_by", "Checked by"), ("approved_by", "Approved by")]
@@ -23,7 +25,8 @@ class Package:
     path: Path
     discipline: str = ""
     responsible: str = ""
-    kind: str = "calcs"            # "calcs" | "drawings"
+    kind: str = "calcs"            # "calcs" | "drawings" | "specs" | "docs"
+    aliases: list[str] = field(default_factory=list)  # other names documents use, e.g. "Specifications"
     include: bool = True           # include this section in the compiled book
     title_page: bool = True        # insert a section title page before it
     order: list[str] = field(default_factory=list)   # document order (doc names without rev suffix)
@@ -31,6 +34,10 @@ class Package:
     @property
     def is_drawings(self) -> bool:
         return self.kind == "drawings"
+
+    @property
+    def is_calcs(self) -> bool:
+        return self.kind == "calcs"
 
     def rank(self, name: str) -> tuple:
         """Sort key for a document name within this section: explicit order first,
@@ -81,7 +88,11 @@ class Project:
     @property
     def book_sections(self) -> list[Package]:
         """Calculation sections that go into the compiled book, in order."""
-        return [p for p in self.packages if not p.is_drawings and p.include]
+        return [p for p in self.packages if p.is_calcs and p.include]
+
+    def is_calc_package(self, pid: str) -> bool:
+        p = self.package(pid)
+        return bool(p and p.is_calcs)
 
 
 def load_project(path: str | Path) -> Project:
@@ -102,6 +113,7 @@ def load_project(path: str | Path) -> Project:
             discipline=p.get("discipline", ""),
             responsible=p.get("responsible", ""),
             kind=str(p.get("kind", "calcs")).lower(),
+            aliases=[str(a) for a in (p.get("aliases") or [])],
             include=bool(p.get("include", True)),
             title_page=bool(p.get("title_page", True)),
             order=[str(o) for o in (p.get("order") or [])],

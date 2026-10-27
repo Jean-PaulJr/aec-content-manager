@@ -22,6 +22,7 @@
   <a class="card pad stat" href="{{ url_for('qa', slug=g.slug) }}"><b>{{ stats.qa_approved }}/{{ stats.qa_total }}</b><span>calcs approved in QA</span></a>
   <a class="card pad stat {{ 'err' if stats.rfi_overdue }}" href="{{ url_for('rfis', slug=g.slug) }}"><b>{{ stats.rfi_open }}</b><span>open RFIs{% if stats.rfi_overdue %} · {{ stats.rfi_overdue }} overdue{% endif %}</span></a>
   <a class="card pad stat {{ 'err' if stats.sub_overdue }}" href="{{ url_for('submittals', slug=g.slug) }}"><b>{{ stats.sub_open }}</b><span>submittals in review{% if stats.sub_overdue %} · {{ stats.sub_overdue }} overdue{% endif %}</span></a>
+  <a class="card pad stat {{ 'warn' if stats.change_items }}" href="{{ url_for('change_register', slug=g.slug) }}"><b>{{ stats.change_items }}</b><span>documents to update for open changes</span></a>
   <a class="card pad stat" href="{{ url_for('documents', slug=g.slug) }}"><b>{{ pending }}</b><span>uploads not yet issued</span></a>
 </div>
 

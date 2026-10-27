@@ -120,7 +120,8 @@ class Workspace:
     def analysis(self, doc: DocRecord) -> DocAnalysis:
         if doc.id not in self._analysis:
             self._analysis[doc.id] = analyze(self.pages(doc), self.rules,
-                                             self.project.package_ids, doc.package)
+                                             self.project.package_ids, doc.package,
+                                             {p.id: p.aliases for p in self.project.packages if p.aliases})
         return self._analysis[doc.id]
 
     def ordered_documents(self, issue: Issue) -> list[DocRecord]:

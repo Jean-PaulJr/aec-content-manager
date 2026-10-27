@@ -162,7 +162,14 @@ class XRef:
 
 
 @dataclass
+class Assumption:
+    page: int
+    text: str
+
+
+@dataclass
 class DocAnalysis:
+    assumptions: list[Assumption] = field(default_factory=list)
     params: list[ParamHit] = field(default_factory=list)
     dcrs: list[DcrHit] = field(default_factory=list)
     elements: list[ElementHit] = field(default_factory=list)
@@ -192,24 +199,71 @@ def _nearest_mark(line_before: str, rules: RuleSet, exclude: set[str], first: bo
     return marks[0] if first else marks[-1]
 
 
+_ASSUME_HEAD = re.compile(r"^\s*(?:DESIGN\s+|GENERAL\s+)?ASSUMPTIONS?\s*:?\s*$", re.IGNORECASE)
+_ASSUME_ITEM = re.compile(r"^\s*(?:\d{1,2}[.)]|[-•*]|[a-z][.)])\s+(?P<t>.+)$")
+_ASSUME_LINE = re.compile(r"^\s*(?:\d{1,2}[.)]\s*)?(?:assume[sd]?|assumption)\b\s*:?\s*(?P<t>.+)$", re.IGNORECASE)
+
+
+def find_assumptions(text: str) -> list[str]:
+    """Assumptions written in a calc: items listed under an ASSUMPTIONS heading,
+    and any line that starts with 'Assume' / 'Assumed' / 'Assumption'."""
+    out: list[str] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if _ASSUME_HEAD.match(ln):
+            i += 1
+            while i < len(lines) and len(out) < 200:
+                m = _ASSUME_ITEM.match(lines[i])
+                if not m:
+                    break
+                out.append(m.group("t").strip())
+                i += 1
+            continue
+        m = _ASSUME_LINE.match(ln)
+        if m:
+            t = ln.strip()
+            t = re.sub(r"^\d{1,2}[.)]\s*", "", t)
+            out.append(t[0].upper() + t[1:] if t else t)
+        i += 1
+    seen, uniq = set(), []
+    for t in out:
+        if t.lower() not in seen:
+            seen.add(t.lower())
+            uniq.append(t)
+    return uniq
+
+
 def normalize_shape(size: str) -> str:
     return re.sub(r"\s+", "", size).upper().replace("×", "X")
 
 
-def analyze(pages: list[str], rules: RuleSet, package_ids: list[str], own_package: str) -> DocAnalysis:
+def analyze(pages: list[str], rules: RuleSet, package_ids: list[str], own_package: str,
+            aliases: dict[str, list[str]] | None = None) -> DocAnalysis:
     a = DocAnalysis()
     pkg_set = set(package_ids)
-    xref_re = None
+    xref_re, alias_of = None, {}
     others = [p for p in package_ids if p != own_package]
+    for pid, names in (aliases or {}).items():
+        if pid != own_package:
+            for n in names:
+                alias_of[n.lower()] = pid
     if others:
-        alt = "|".join(re.escape(p) for p in sorted(others, key=len, reverse=True))
+        ids = "|".join(re.escape(p) for p in sorted(others, key=len, reverse=True))
+        al = "|".join(re.escape(n) for n in sorted(alias_of, key=len, reverse=True))
+        name = ids + (f"|(?i:{al})" if al else "")
         xref_re = re.compile(
-            rf"\b(?P<pkg>{alt})\b[^\n]{{0,40}}?\bRev(?:ision)?\.?\s*(?P<rev>[A-Z0-9]{{1,3}})\b"
+            rf"\b(?P<pkg>{name})\b[^\n]{{0,40}}?\b(?:(?:Rev(?:ision)?|REV|Version|VERSION|Ver)\.?\s*"
+            rf"(?P<rev>[A-Z0-9]{{1,3}})|[VR](?P<rev2>\d{{1,3}}))\b"
         )
 
     for pno, text in enumerate(pages, start=1):
         if not text:
             continue
+
+        for t in find_assumptions(text):
+            a.assumptions.append(Assumption(pno, t))
 
         # Design parameters -------------------------------------------------
         for rule in rules.params.values():
@@ -268,5 +322,8 @@ def analyze(pages: list[str], rules: RuleSet, package_ids: list[str], own_packag
         # References to other packages' revisions ---------------------------
         if xref_re:
             for m in xref_re.finditer(text):
-                a.xrefs.append(XRef(pno, m.group("pkg"), m.group("rev").upper(), m.group(0)))
+                pkg = m.group("pkg")
+                pkg = pkg if pkg in pkg_set else alias_of.get(pkg.lower(), pkg)
+                rev = (m.group("rev") or m.group("rev2") or "").upper()
+                a.xrefs.append(XRef(pno, pkg, rev, m.group(0)))
     return a

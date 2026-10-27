@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="top"><div><h1>Submittals</h1><div class="sub">Shop drawings, delegated-design calcs and product data received for structural review.</div></div>
+<div class="top"><div><h1>Submittals</h1><div class="sub">Shop drawings, delegated design, product data and requests for material changes received for structural review.</div></div>
   {% if edit %}<a class="btn" href="{{ url_for('submittals', slug=g.slug) }}">New submittal</a>{% endif %}</div>
 <div class="row" style="margin-bottom:14px">
   {% for s in statuses %}{% set n = rows|selectattr('status', 'equalto', s)|list|length %}{% if n %}<span class="pill {{ s|replace(' ', '-') }}">{{ n }} {{ s }}</span>{% endif %}{% endfor %}
   {% set od = rows|selectattr('overdue')|list|length %}{% if od %}<span class="pill error">{{ od }} overdue</span>{% endif %}
 </div>
 <div class="card scroll"><table>
-  <thead><tr><th>No.</th><th>Spec</th><th>Title</th><th>Contractor</th><th>Rev</th><th>Status</th><th>Received</th><th>Due</th><th>Returned</th><th></th></tr></thead><tbody>
+  <thead><tr><th>No.</th><th>Type</th><th>Spec</th><th>Title</th><th>Contractor</th><th>Rev</th><th>Status</th><th>Received</th><th>Due</th><th>Returned</th><th></th></tr></thead><tbody>
   {% for r in rows %}<tr>
-    <td class="mono date"><b>{{ r.number }}</b></td><td class="mono small">{{ r.spec_section }}</td>
+    <td class="mono date"><b>{{ r.number }}</b></td><td class="small">{{ r.kind or 'Shop drawings' }}</td><td class="mono small">{{ r.spec_section }}</td>
     <td><b>{{ r.title }}</b>{% if r.notes %}<div class="small muted">{{ r.notes[:140] }}</div>{% endif %}</td>
     <td class="small">{{ r.contractor }}</td><td class="mono">{{ r.revision }}</td>
     <td><span class="pill {{ r.status|replace(' ', '-') }}">{{ r.status }}</span>{% if r.reviewer %}<div class="small muted">{{ r.reviewer }}</div>{% endif %}</td>
@@ -17,7 +17,7 @@
     <td class="mono small date {{ 'over' if r.overdue }}">{{ r.due_on or '—' }}{% if r.overdue %} · overdue{% endif %}</td>
     <td class="mono small date">{{ r.returned_on or '—' }}</td>
     <td><a class="btn sm" href="{{ url_for('submittals', slug=g.slug, edit=r.id) }}">Edit</a></td></tr>
-  {% else %}<tr><td colspan="10" class="empty">No submittals yet.</td></tr>{% endfor %}</tbody></table></div>
+  {% else %}<tr><td colspan="11" class="empty">No submittals yet.</td></tr>{% endfor %}</tbody></table></div>
 
 <h2>{{ 'Edit ' ~ edit.number if edit else 'Log a submittal' }}</h2>
 {% set e = edit or {} %}
@@ -25,6 +25,7 @@
   {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
   <div class="grid g4">
     <label class="field">Number<input type="text" name="number" id="sub-number" value="{{ e.number or next_no }}"></label>
+    <label class="field">Type<select class="in" name="kind" id="sub-kind">{% for k in kinds %}<option {{ 'selected' if e.kind == k }}>{{ k }}</option>{% endfor %}</select></label>
     <label class="field">Spec section<input type="text" name="spec_section" id="sub-spec" value="{{ e.spec_section or '' }}" placeholder="05 12 00"></label>
     <label class="field" style="grid-column:span 2">Title<input type="text" name="title" id="sub-title" value="{{ e.title or '' }}" required placeholder="Structural steel shop drawings — Level 2"></label>
     <label class="field">Contractor<input type="text" name="contractor" id="sub-contractor" value="{{ e.contractor or '' }}"></label>

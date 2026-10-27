@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "calcbook"
+name = "bigdelta"
 version = "0.1.0"
-description = "AEC Content Manager: report packages, revisions, design-intent checks, drawing comparison, QA, RFIs and submittals for structural engineers"
+description = "BigDelta: report packages, revisions, design-intent checks, drawing comparison, QA, RFIs and submittals for structural engineers"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -25,7 +25,7 @@ dev = ["pytest>=7"]
 
 [project.scripts]
 calcbook = "calcbook.cli:main"
-aec-content-manager = "calcbook.cli:main"
+bigdelta = "calcbook.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["calcbook*"]

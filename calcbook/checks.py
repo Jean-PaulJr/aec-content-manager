@@ -15,6 +15,7 @@ from .config import Basis, parse_basis
 from .extract import ParamHit
 from .history import UNCHANGED, Workspace, compress_ranges, doc_statuses, package_revisions
 from .store import DocRecord, Issue
+from .rules import code_label
 from .units import fmt
 
 SEVERITIES = ("error", "warning", "info")
@@ -176,7 +177,7 @@ def check_code_editions(ws: Workspace, docs: list[DocRecord], basis: Basis) -> l
                         if len(ed) == 2 else
                         f"Cites {refs[0].raw.strip()}; design basis adopts {basis.codes[fam]} {fam}",
                         d.package, d.doc_key, d.title, _pages(refs),
-                        expected=f"{fam} ({basis.codes[fam]})", found=f"{fam} ({ed})",
+                        expected=code_label(fam, basis.codes[fam]), found=code_label(fam, ed),
                         evidence=refs[0].raw))
             elif basis.codes:
                 not_in_basis[(fam, ed)].append(_loc(d, _pages(refs)))

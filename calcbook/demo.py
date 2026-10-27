@@ -70,6 +70,15 @@ packages:
     path: drawings/structural
     kind: drawings
     responsible: "J. Rivera"
+  - id: SPEC
+    title: Specifications
+    path: specifications/structural
+    kind: specs
+    aliases: [Specifications, Specs]
+  - id: PC
+    title: Plan Check Comments & Responses
+    path: documents/plan-check
+    kind: docs
 
 basis: design_basis.yaml
 output: output
@@ -101,6 +110,11 @@ parameters:
 
 dcr_limit: 1.0
 dcr_warning: 0.95
+
+assumptions:
+  - Floor diaphragm is rigid for distribution of lateral loads.
+  - Lab equipment loads per Bayfront equipment schedule dated 2026-09-30.
+  - No future vertical expansion.
 """
 
 
@@ -145,6 +159,9 @@ def issue_a(pk: Path) -> None:
     calc_pdf(pk / "gravity/GRV-02_Floor_Beams_RevA.pdf", "GRV-02", "Floor Beams", "A. Chen", "A", [[
         "TYPICAL FLOOR BEAMS - LEVEL 2",
         "LL = 100 psf,  span = 30 ft,  trib = 10 ft",
+        "ASSUMPTIONS:",
+        "1. Top flange continuously braced by metal deck",
+        "2. Simple spans, composite action ignored",
         "",
         "B-12  W16X31  Mu = 162 k-ft   phiMn = 203 k-ft",
         "      DCR = 0.80   deflection L/412  OK",
@@ -213,6 +230,9 @@ def issue_b(pk: Path) -> None:
     calc_pdf(pk / "gravity/GRV-02_Floor_Beams_RevB.pdf", "GRV-02", "Floor Beams", "A. Chen", "B", [[
         "TYPICAL FLOOR BEAMS - LEVEL 2   (revised for added lab equipment)",
         "LL = 100 psf,  span = 30 ft,  trib = 10 ft,  equipment 1.5 k pt load",
+        "ASSUMPTIONS:",
+        "1. Top flange continuously braced by metal deck",
+        "2. Simple spans, composite action ignored",
         "",
         "B-12  W18X35  Mu = 214 k-ft   phiMn = 249 k-ft",
         "      DCR = 0.86   deflection L/455  OK",
@@ -239,6 +259,7 @@ def issue_b(pk: Path) -> None:
         "f'c = 4000 psi,  fy = 60 ksi",
         "F-1  8'-0\" x 8'-0\" x 24\"   q = 4,210 psf   OK",
         "Column loads per GRV Rev B",
+        "Brace frame uplift per LAT-03, anchor bolts per FDN-04",
     ]])
     (pk / "foundations/FDN-03_Retaining_Wall.pdf").unlink()
     calc_pdf(pk / "foundations/FDN-02_Slab_on_Grade.pdf", "FDN-02", "Slab on Grade", "P. Shah", "B", [[
@@ -354,6 +375,7 @@ def _general_notes(c, wind: int) -> None:
         "5. CONCRETE: f'c = 4000 psi U.N.O.   REINFORCING ASTM A615 GRADE 60.",
         "6. STRUCTURAL STEEL: WIDE FLANGE ASTM A992, Fy = 50 ksi.  HSS ASTM A500 GR. C.",
         "7. FOUNDATIONS: ALLOWABLE BEARING PRESSURE = 4000 psf PER GEOTECH REPORT GR-114.",
+        "8. MATERIALS AND EXECUTION PER PROJECT SPECIFICATIONS REV A.",
     ]
     c.setFont("Helvetica", 9)
     for i, ln in enumerate(lines):
@@ -387,7 +409,8 @@ def drawing_set(path: Path, sheets: list[str], rev: str) -> None:
     if rev == "B":
         revs.append(("B", "2026-10-23", "PERMIT"))
     c = canvas.Canvas(str(path), pagesize=SHEET)
-    c.setTitle(path.stem.replace("_", " "))
+    from .extract import strip_rev_suffix
+    c.setTitle(strip_rev_suffix(path.stem).replace("_", " "))
     for sid in sheets:
         if sid == "S-001":
             _general_notes(c, 92 if rev == "A" else 95)
@@ -427,11 +450,45 @@ def hand_calc(path: Path) -> None:
     path.write_bytes(image_to_pdf(buf.getvalue()))
 
 
+def specs(folder: Path, rev: str) -> None:
+    calc_pdf(folder / "05_12_00_Structural_Steel.pdf", "05 12 00", "Structural Steel", "Rivera Structural", "A", [[
+        "SECTION 05 12 00 - STRUCTURAL STEEL FRAMING",
+        "1.1 REFERENCES: AISC 360-22, AISC 341-22, AWS D1.1",
+        "2.1 W SHAPES: ASTM A992, Fy = 50 ksi",
+        "2.2 HSS: ASTM A500 Grade C",
+    ]])
+    calc_pdf(folder / f"03_30_00_Cast_in_Place_Concrete_Rev{rev}.pdf", "03 30 00", "Cast-in-Place Concrete",
+             "Rivera Structural", rev, [[
+        "SECTION 03 30 00 - CAST-IN-PLACE CONCRETE",
+        "1.1 REFERENCES: ACI 318-19, ACI 301",
+        "2.1 CONCRETE: f'c = 4000 psi at 28 days U.N.O.",
+        "2.2 REINFORCING: ASTM A615 Grade 60" + ("" if rev == "A" else ""),
+    ] + ([] if rev == "A" else ["2.3 SLAB ON GRADE: f'c = 4000 psi minimum, max w/c 0.45 (revised)"])])
+    if rev == "B":
+        old = folder / "03_30_00_Cast_in_Place_Concrete_RevA.pdf"
+        if old.exists():
+            old.unlink()
+
+
 def seed_logs(target: Path) -> None:
     from .projects import open_workspace
     from .tracker import Tracker
+    from .tracker import sync_basis_changes
     ws = open_workspace(target / "project.yaml")
     tr = Tracker(ws.store)
+    sync_basis_changes(ws, ws.store.resolve("B"))
+    tr.add_change("Add 10 in. opening in B-12 web for lab exhaust", "Per RFI-001 answer: web stiffeners "
+                  "each side of opening, detail 7/S-501.", "RFI",
+                  ["GRV/GRV-02_Floor_Beams", "CONN/CONN-01_Beam_Connections", "DWG/S-100_Plans"],
+                  opened_issue="A")
+    tr.add_note("lesson", "A. Chen", "Get the lab equipment schedule before DD — B-12 had to be upsized late "
+                "for a 1.5 k point load.", "GRV/GRV-02_Floor_Beams", "loads, coordination")
+    tr.add_note("issue", "P. Shah", "Storm drain at grid D/4 conflicts with footing F-1. See RFI-002.",
+                "FDN/FDN-01_Spread_Footings", "civil, footing")
+    tr.add_note("decision", "J. Rivera", "Adopt ASCE 7-22 wind speeds for the permit set (95 mph).", "",
+                "wind, code")
+    tr.add_note("plancheck", "M. Okafor", "Plan checker requires SDS = 1.20 from GR-114; site-specific "
+                "study not accepted.", "LAT/LAT-01_Seismic_Base_Shear", "seismic")
     tr.log("issue", "A", "Issue A recorded — 50% Construction Documents")
     tr.log("issue", "B", "Issue B recorded — Permit submittal")
     for key, action, who, note in [
@@ -500,6 +557,7 @@ def build(target: Path, quiet: bool = False, outputs: bool = True) -> Path:
     (target / "design_basis.yaml").write_text(BASIS.format(wind=92))
     issue_a(pk)
     drawing_set(dw / "Structural_Set_RevA.pdf", ["S-001", "S-101", "S-201"], "A")
+    specs(target / "specifications/structural", "A")
     run("ingest", "A", "--note", "50% Construction Documents", "--date", "2026-08-14")
 
     (target / "design_basis.yaml").write_text(BASIS.format(wind=95))
@@ -508,6 +566,12 @@ def build(target: Path, quiet: bool = False, outputs: bool = True) -> Path:
     drawing_set(dw / "S-001_General_Notes_RevB.pdf", ["S-001"], "B")
     drawing_set(dw / "S-100_Plans_RevB.pdf", ["S-101", "S-201"], "B")
     hand_calc(pk / "foundations/FDN-04_Anchor_Bolts_Hand_Calc.pdf")
+    specs(target / "specifications/structural", "B")
+    calc_pdf(target / "documents/plan-check/PC-01_Plan_Check_Comments.pdf", "PC-01", "Plan Check Comments",
+             "City of SF DBI", "1", [["PLAN CHECK COMMENTS - ROUND 1",
+                                      "S1. Provide SDS = 1.20 per geotech report GR-114 (LAT-01).",
+                                      "S2. Justify C-3 interaction ratio > 1.0 (GRV-03).",
+                                      "S3. Wind design shall be per ASCE 7-22, V = 95 mph (LAT-02)."]])
     run("ingest", "B", "--note", "Permit submittal - revised per lab equipment", "--date", "2026-10-23")
     seed_logs(target)
 

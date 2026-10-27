@@ -91,24 +91,24 @@
 </section>
 {% endfor %}
 
-<h2 style="margin:8px 0 0">Drawing sets</h2>
-{% for pkg in g.ws.project.packages if pkg.is_drawings %}
+<h2 style="margin:8px 0 0">Drawings, specifications &amp; other documents</h2>
+{% for pkg in g.ws.project.packages if not pkg.is_calcs %}
 <section class="card" id="pkg-{{ pkg.id }}">
-  <div class="pkg-head"><b>{{ pkg.title }}</b><span class="id">{{ pkg.id }}</span><span class="spacer"></span>
-    <span class="muted small">{{ files[pkg.id]|length }} file(s) · tracked under Drawing changes</span></div>
+  <div class="pkg-head"><b>{{ pkg.title }}</b><span class="id">{{ pkg.id }}</span><span class="kind">{{ KINDS[pkg.kind] }}</span><span class="spacer"></span>
+    <span class="muted small">{{ files[pkg.id]|length }} file(s) · {{ 'compared sheet by sheet under Drawing changes' if pkg.is_drawings else 'versioned and cross-checked' }}</span></div>
   <div class="pad" style="padding-top:12px;padding-bottom:12px">
     <form class="upload" method="post" enctype="multipart/form-data" action="{{ url_for('upload', slug=g.slug) }}">
       <input type="hidden" name="package" value="{{ pkg.id }}"><input type="hidden" name="position" value="end">
-      <label class="drop"><input type="file" name="files" accept=".pdf" multiple><b>Drop drawing PDFs</b> — sheets are matched by sheet number</label>
+      <label class="drop"><input type="file" name="files" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff" multiple><b>Drop PDFs</b>{{ ' — sheets are matched by sheet number' if pkg.is_drawings else '' }}</label>
     </form>
   </div>
   {% if files[pkg.id] %}<ol class="doclist static">{% for f in files[pkg.id] %}
-    <li class="doc"><span class="t"><b class="mono">{{ f.rel }}</b></span><span class="muted small">{{ f.pages }} sheets</span>
+    <li class="doc"><span class="t"><b class="mono">{{ f.rel }}</b></span><span class="muted small">{{ f.pages }} {{ 'sheets' if pkg.is_drawings else 'pp' }}</span>
       <span class="pill {{ f.status }}">{{ {'issued': 'in ' ~ f.issued_rev, 'modified': 'revised', 'new': 'new'}[f.status] }}</span>
       <form method="post" action="{{ url_for('remove_file', slug=g.slug) }}" class="rm"><input type="hidden" name="package" value="{{ pkg.id }}">
         <input type="hidden" name="rel" value="{{ f.rel }}"><button class="btn sm danger" title="Remove">✕</button></form></li>{% endfor %}</ol>{% endif %}
 </section>
-{% else %}<div class="card pad muted small">No drawing sets. Add one with “Add section” and choose Drawing set.</div>{% endfor %}
+{% else %}<div class="card pad muted small">None yet. Use “Add section” and choose a drawing set, specifications or other documents.</div>{% endfor %}
 
 {% if withdrawn %}
 <div class="card pad"><h3>Withdrawn in the next issue</h3>
@@ -145,7 +145,7 @@
     <input type="hidden" name="action" value="add">
     <label class="field">Title<input type="text" name="title" id="new-section" placeholder="e.g. Elevator Pit" required></label>
     <div class="row">
-      <label class="field" style="flex:1">Type<select class="in" name="kind"><option value="calcs">Calculations</option><option value="drawings">Drawing set</option></select></label>
+      <label class="field" style="flex:1">Type<select class="in" name="kind">{% for k, v in KINDS.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
       <label class="field" style="flex:1">Place after<select class="in" name="after">
         {% for p in g.ws.project.packages %}<option value="{{ p.id }}" {{ 'selected' if loop.last }}>{{ p.title }}</option>{% endfor %}</select></label>
     </div>

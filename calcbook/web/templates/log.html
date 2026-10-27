@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><div><h1>Engineering log</h1>
+  <div class="sub">Changes, issues, decisions and lessons learned, logged by the team so the next project starts smarter.</div></div></div>
+<form class="card pad grid" method="post" action="{{ url_for('log_add', slug=g.slug) }}" style="gap:10px;margin-bottom:16px">
+  <div class="row">
+    <label class="field">Type<select class="in" name="category" id="note-cat">{% for k, v in categories.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+    <label class="field">Your name<input type="text" name="author" id="note-author" required></label>
+    <label class="field" style="flex:1;min-width:200px">Related document<select class="in" name="doc_key" id="note-doc"><option value="">— none —</option>
+      {% for d in docs %}<option value="{{ d.doc_key }}">{{ d.title }}</option>{% endfor %}</select></label>
+    <label class="field">Tags<input type="text" name="tags" id="note-tags" placeholder="seismic, coordination"></label>
+  </div>
+  <label class="field">Note<textarea name="text" id="note-text" rows="3" style="font-family:inherit" required placeholder="What happened, why it matters, what to do next time"></textarea></label>
+  <div class="row"><span class="spacer"></span><button class="btn primary">Log it</button></div>
+</form>
+<div class="row" style="margin-bottom:10px">
+  <div class="tabs"><a class="{{ 'on' if not cat }}" href="{{ url_for('log', slug=g.slug, q=q or None) }}">All</a>
+    {% for k, v in categories.items() %}<a class="{{ 'on' if cat == k }}" href="{{ url_for('log', slug=g.slug, category=k, q=q or None) }}">{{ v }}</a>{% endfor %}</div>
+  <form method="get" style="flex:1;min-width:200px" class="row">{% if cat %}<input type="hidden" name="category" value="{{ cat }}">{% endif %}
+    <input type="search" name="q" id="note-q" value="{{ q }}" placeholder="Search notes, tags, documents…" style="flex:1"></form>
+</div>
+<div class="card">
+  {% for n in notes %}
+  <div class="note">
+    <div class="meta"><span class="pill cat-{{ n.category }}">{{ categories[n.category] }}</span><b style="color:var(--ink)">{{ n.author }}</b>
+      <span class="mono">{{ n.created[:16]|replace('T', ' ') }}</span>
+      {% if n.doc_key %}<span class="mono">{{ n.doc_key }}</span>{% endif %}
+      {% for t in n.tags.split(',') if t.strip() %}<span class="pill unchanged">#{{ t.strip() }}</span>{% endfor %}</div>
+    <div>{{ n.text }}</div>
+  </div>
+  {% else %}<div class="empty">Nothing logged{{ ' for this filter' if cat or q }} yet.</div>{% endfor %}
+</div>
+{% endblock %}

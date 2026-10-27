@@ -6,6 +6,14 @@
   <div class="row">{{ issue_select('issue', issue, 'Issue', 'findings') }}
     <a class="btn" href="{{ url_for('download_findings', slug=g.slug, issue=issue.label) }}">CSV</a></div>
 </div>
+{% if differs %}
+<div class="impact" style="margin-bottom:14px"><div class="row">
+  <span>{% if mode == 'working' %}<b>Checking against the current design basis</b>, which has changes not yet issued (e.g. a switched code edition).{% else %}<b>Checking against the basis captured with Issue {{ issue.label }}.</b>{% endif %}</span>
+  <span class="spacer"></span>
+  <div class="tabs"><a class="{{ 'on' if mode == 'working' }}" href="{{ url_for('findings', slug=g.slug, issue=issue.label, basis='working') }}">Current basis</a>
+    <a class="{{ 'on' if mode == 'issued' }}" href="{{ url_for('findings', slug=g.slug, issue=issue.label, basis='issued') }}">Issue {{ issue.label }} basis</a></div>
+</div></div>
+{% endif %}
 <div class="grid g4" style="margin-bottom:14px">
   <div class="card pad stat err"><b>{{ c.error }}</b><span>errors</span></div>
   <div class="card pad stat warn"><b>{{ c.warning }}</b><span>warnings</span></div>

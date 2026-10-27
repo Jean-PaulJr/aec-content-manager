@@ -31,6 +31,8 @@ BUILTIN_TEMPLATES = {
             {"id": "LAT", "title": "Lateral System"}, {"id": "FDN", "title": "Foundations"},
             {"id": "CONN", "title": "Connections"}, {"id": "APX", "title": "Appendix"},
             {"id": "DWG", "title": "Structural Drawings", "kind": "drawings"},
+            {"id": "SPEC", "title": "Specifications", "kind": "specs", "aliases": ["Specifications", "Specs"]},
+            {"id": "PC", "title": "Plan Check Comments & Responses", "kind": "docs"},
         ]},
     "wood-multifamily": {
         "name": "Wood-framed multifamily",
@@ -39,6 +41,8 @@ BUILTIN_TEMPLATES = {
             {"id": "SW", "title": "Shear Walls"}, {"id": "HD", "title": "Holdowns & Anchorage"},
             {"id": "FDN", "title": "Foundations"}, {"id": "APX", "title": "Appendix"},
             {"id": "DWG", "title": "Structural Drawings", "kind": "drawings"},
+            {"id": "SPEC", "title": "Specifications", "kind": "specs", "aliases": ["Specifications", "Specs"]},
+            {"id": "PC", "title": "Plan Check Comments & Responses", "kind": "docs"},
         ]},
     "seismic-retrofit": {
         "name": "Seismic retrofit (ASCE 41)",
@@ -57,7 +61,8 @@ DEFAULT_TEMPLATE = "commercial-steel-concrete"
 
 
 def section_path(title: str, kind: str = "calcs") -> str:
-    return f"{'drawings' if kind == 'drawings' else 'packages'}/{slugify(title)}"
+    top = {"drawings": "drawings", "specs": "specifications", "docs": "documents"}.get(kind, "packages")
+    return f"{top}/{slugify(title)}"
 
 
 def template_packages(tpl: dict) -> list[dict]:
@@ -65,8 +70,10 @@ def template_packages(tpl: dict) -> list[dict]:
     for s in tpl.get("sections", []):
         kind = s.get("kind", "calcs")
         d = {"id": str(s["id"]).upper(), "title": s["title"], "path": section_path(s["title"], kind)}
-        if kind == "drawings":
-            d["kind"] = "drawings"
+        if kind != "calcs":
+            d["kind"] = kind
+        if s.get("aliases"):
+            d["aliases"] = list(s["aliases"])
         if s.get("title_page") is False:
             d["title_page"] = False
         out.append(d)
@@ -138,8 +145,10 @@ class Home:
         sections = []
         for p in project.packages:
             s = {"id": p.id, "title": p.title}
-            if p.is_drawings:
-                s["kind"] = "drawings"
+            if not p.is_calcs:
+                s["kind"] = p.kind
+            if p.aliases:
+                s["aliases"] = list(p.aliases)
             if not p.title_page:
                 s["title_page"] = False
             if p.include:
@@ -230,7 +239,8 @@ def number_working(project: Project, files: dict[str, list[WorkingFile]], has_pr
     changed = sum(1 for _, fs in secs for f in fs if f.status != "issued")
     n_toc = max(1, -(-toc_rows // ROWS_PER_PAGE))
     n_rev = -(-max(1, changed) // ROWS_PER_PAGE) if has_previous else 0
-    sheet = 1 + n_toc + n_rev + 1
+    n_codes = 1          # codes & assumptions page (one page unless the lists are very long)
+    sheet = 1 + n_toc + n_codes + n_rev + 1
     sections = {}
     for i, (p, fs) in enumerate(secs, 1):
         first = sheet
@@ -240,7 +250,7 @@ def number_working(project: Project, files: dict[str, list[WorkingFile]], has_pr
             f.number, f.start = f"{i}.{j}", sheet
             sheet += f.pages
         sections[p.id] = {"number": i, "first": first, "last": sheet - 1}
-    return {"total": sheet - 1, "front": 1 + n_toc + n_rev, "sections": sections}
+    return {"total": sheet - 1, "front": 1 + n_toc + n_codes + n_rev, "sections": sections}
 
 
 def safe_name(filename: str) -> str:
@@ -330,7 +340,7 @@ def save_upload(project: Project, package_id: str, filename: str, data: bytes,
             replaced.append(f.name)
             f.unlink()
     (pkg.path / name).write_bytes(data)
-    if not replaced and not pkg.is_drawings:
+    if not replaced and pkg.is_calcs:
         place_document(project, package_id, doc_name(name), position)
     return name, [r for r in replaced if r != name]
 
@@ -394,8 +404,8 @@ def add_section(project: Project, title: str, kind: str = "calcs", after: str | 
 
     def fn(data):
         entry = {"id": sid, "title": title, "path": path}
-        if kind == "drawings":
-            entry["kind"] = "drawings"
+        if kind != "calcs":
+            entry["kind"] = kind
         ids = [str(p["id"]).upper() for p in data["packages"]]
         idx = ids.index(after) + 1 if after in ids else len(ids)
         data["packages"].insert(idx, entry)

@@ -126,6 +126,26 @@ DEFAULT_CODES: dict[str, list[str]] = {
     "SDPWS": [r"\b(?P<ed>20\d{2})\s+SDPWS\b", r"\bSDPWS\s*[-–]?\s*(?P<ed>20\d{2})\b"],
 }
 
+# Editions offered when switching the adopted code (2-digit = ASCE/ACI/AISC style suffix).
+CODE_EDITIONS: dict[str, list[str]] = {
+    "ASCE 7": ["10", "16", "22"],
+    "ACI 318": ["14", "19", "25"],
+    "AISC 360": ["10", "16", "22"],
+    "AISC 341": ["10", "16", "22"],
+    "AISC 358": ["16", "22"],
+    "TMS 402": ["16", "22"],
+    "IBC": ["2018", "2021", "2024"],
+    "CBC": ["2019", "2022", "2025"],
+    "NDS": ["2018", "2024"],
+    "SDPWS": ["2021", "2024"],
+}
+
+
+def code_label(family: str, edition: str) -> str:
+    """'ASCE 7', '22' -> 'ASCE 7-22';  'CBC', '2025' -> '2025 CBC'."""
+    return f"{edition} {family}" if len(edition) == 4 else f"{family}-{edition}"
+
+
 # Member marks like B-12, C-3, BR-1 (a hyphen is required so W18X35 / A992 don't match).
 DEFAULT_MARK = r"\b[A-Z]{1,3}-\d{1,3}[A-Z]?\b"
 

@@ -75,7 +75,7 @@ def test_compress_ranges():
 def test_revision_diff(demo):
     a, b = demo.store.resolve("A"), demo.store.resolve("B")
     d = compare(demo, a, b)
-    calcs = [c for c in d.changes if c.package != "DWG"]
+    calcs = [c for c in d.changes if demo.project.is_calc_package(c.package)]
     assert {s: sum(c.status == s for c in calcs) for s in ("new", "revised", "removed", "unchanged")} == \
         {"new": 2, "revised": 3, "removed": 1, "unchanged": 5}     # FDN-02 + scanned FDN-04
     beams = next(c for c in d.changes if c.doc_key == "GRV/GRV-02_Floor_Beams")
@@ -108,12 +108,12 @@ def test_compiled_book(demo):
     r = PdfReader(str(out))
     assert len(r.pages) == info["sheets"]
     top = [o.title for o in r.outline if not isinstance(o, list)]
-    assert top[:3] == ["Cover", "Contents", "Revision summary"]
-    assert top[3:] == ["1  Gravity Framing", "2  Lateral System", "3  Foundations", "4  Steel Connections"]
+    assert top[:4] == ["Cover", "Contents", "Codes & assumptions", "Revision summary"]
+    assert top[4:] == ["1  Gravity Framing", "2  Lateral System", "3  Foundations", "4  Steel Connections"]
     assert f"Sheet {info['sheets']} of {info['sheets']}" in r.pages[-1].extract_text()
-    beams = r.pages[5].extract_text()                    # 1.2 GRV-02 sheet 1, after section title page
+    beams = r.pages[6].extract_text()                    # 1.2 GRV-02 sheet 1, after section title page
     assert "GRV-02" in beams and "REVISED" in beams
-    assert "Gravity Framing" in r.pages[3].extract_text()  # section title page
+    assert "Gravity Framing" in r.pages[4].extract_text()  # section title page
 
 
 def test_report_package_builder(tmp_path):
@@ -137,7 +137,7 @@ def test_report_package_builder(tmp_path):
     files, _ = working_files(ws)
     assert [x.name for x in files["FRM"]] == ["A-01_Loads", "A-02_Beams", "A-03_Joists"]
     n = number_working(ws.project, files, False)
-    assert [x.start for x in files["FRM"]] == [4, 5, 7]   # cover, contents, section title page
+    assert [x.start for x in files["FRM"]] == [5, 6, 8]   # cover, contents, codes, section title page
     set_order(ws.project, "FRM", ["A-03_Joists", "A-01_Loads", "A-02_Beams"])
     update_section(ws.project, "SW", include=False)
     sid = add_section(ws.project, "Elevator Pit")

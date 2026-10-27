@@ -1,4 +1,4 @@
-"""AEC Content Manager — local web app.
+"""BigDelta — local web app.
 
 Several projects; report package builder (sections from templates, upload,
 ordering, signatures, draft and issued calc books); revision tracking; design
@@ -11,16 +11,21 @@ The workspace can be a folder on the company server (a mapped drive or UNC path)
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 from flask import (Flask, abort, flash, g, redirect, render_template, request, send_file,
                    url_for)
 
+from .. import brand
 from .. import drawings as dwg
+from ..citations import assumptions as list_assumptions
+from ..citations import codes_cited
+from ..rules import CODE_EDITIONS, code_label
 from ..checks import counts, run_checks, write_findings
 from ..compile import compile_draft, compile_issue
-from ..config import PHASES, SIGN_ROLES, edit_project, load_project, parse_basis
+from ..config import KINDS, PHASES, SIGN_ROLES, edit_project, load_project, parse_basis, read_basis_raw
 from ..demo import build as build_demo
 from ..diff import compare
 from ..history import compress_ranges, register
@@ -28,8 +33,8 @@ from ..ingest import ingest
 from ..projects import (Home, add_section, delete_working_file, doc_name, move_document, number_working,
                         place_document, remove_section, reorder_sections, save_upload, set_order,
                         update_section, working_files)
-from ..tracker import (QA_ACTIONS, QA_STATUS, RFI_STATUSES, SUBMITTAL_OPEN, SUBMITTAL_STATUSES,
-                       Tracker)
+from ..tracker import (CHANGE_SOURCES, NOTE_CATEGORIES, QA_ACTIONS, QA_STATUS, RFI_STATUSES, SUBMITTAL_KINDS,
+                       SUBMITTAL_OPEN, SUBMITTAL_STATUSES, Tracker, record_code_change, sync_basis_changes)
 from ..units import fmt
 
 STATUS_ORDER = {"changed": 0, "new": 1, "removed": 2, "unchanged": 3}
@@ -37,16 +42,23 @@ STATUS_ORDER = {"changed": 0, "new": 1, "removed": 2, "unchanged": 3}
 
 def create_app(workspace: str | Path) -> Flask:
     app = Flask(__name__)
-    app.config["SECRET_KEY"] = "calcbook-local"
+    app.config["SECRET_KEY"] = "bigdelta-local"
     app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
     home = Home(Path(workspace))
     app.config["HOME"] = home
+    static = Path(app.static_folder)
+    if not all((static / f).exists() for f in brand.ICON_FILES):
+        try:
+            brand.write_icons(static)
+        except OSError:
+            pass
 
     @app.context_processor
     def globals_():
         return {"all_projects": [(e.slug, _project_name(e)) for e in home.list()],
                 "ranges": compress_ranges, "fmt": fmt,
-                "region_label": dwg.region_label, "PHASES": PHASES}
+                "region_label": dwg.region_label, "PHASES": PHASES, "APP_NAME": brand.APP_NAME,
+                "logo_svg": brand.logo_svg(), "KINDS": KINDS}
 
     def _project_name(e) -> str:
         try:
@@ -144,13 +156,14 @@ def create_app(workspace: str | Path) -> Flask:
         rfis, subs = tr.rfis(), tr.submittals()
         qa = tr.qa_status()
         calc_docs = [d for d in (ws.store.documents(latest) if latest else [])
-                     if not ws.project.is_drawing_package(d.package)]
+                     if ws.project.is_calc_package(d.package)]
         approved = sum(1 for d in calc_docs if qa.get(d.doc_key) and qa[d.doc_key].action == "approved")
         stats = {
             "rfi_open": sum(r["status"] == "open" for r in rfis), "rfi_overdue": sum(r["overdue"] for r in rfis),
             "sub_open": sum(r["status"] in SUBMITTAL_OPEN for r in subs),
             "sub_overdue": sum(r["overdue"] for r in subs),
             "qa_approved": approved, "qa_total": len(calc_docs),
+            "change_items": sum(c["total"] - c["done"] for c in tr.changes()),
         }
         ms = ws.project.milestones
         return render_template("overview.html", tab="overview", latest=latest, c=c, diff=diff,
@@ -222,6 +235,7 @@ def create_app(workspace: str | Path) -> Flask:
         except ValueError as e:
             flash(str(e), "error")
             return redirect(url_for("documents", slug=slug))
+        sync_basis_changes(ws, res.issue)
         Tracker(ws.store).log("issue", res.issue.label,
                               f"Issue {res.issue.label} recorded — {res.issue.note or 'no description'} "
                               f"({res.documents} documents, {res.pages} sheets)")
@@ -237,9 +251,13 @@ def create_app(workspace: str | Path) -> Flask:
         issue = pick_issue(ws)
         if not issue:
             return render_template("empty.html", tab="findings")
-        fs, basis = run_checks(ws, issue)
+        working = read_basis_raw(ws.project)
+        differs = working != issue.basis and issue.id == ws.store.latest().id
+        mode = request.args.get("basis") or ("working" if differs else "issued")
+        checked = replace(issue, basis=working) if mode == "working" and differs else issue
+        fs, basis = run_checks(ws, checked)
         return render_template("findings.html", tab="findings", issue=issue, findings=fs,
-                               c=counts(fs), basis=basis)
+                               c=counts(fs), basis=basis, differs=differs, mode=mode)
 
     # ------------------------------------------------------------ changes
     @app.get("/p/<slug>/changes")
@@ -532,7 +550,8 @@ def create_app(workspace: str | Path) -> Flask:
         tr = Tracker(ws.store)
         edit = tr.get("submittals", request.args.get("edit", type=int) or 0) if request.args.get("edit") else None
         return render_template("submittals.html", tab="submittals", rows=tr.submittals(), edit=edit,
-                               statuses=SUBMITTAL_STATUSES, next_no=tr.next_number("submittals", "SUB"),
+                               statuses=SUBMITTAL_STATUSES, kinds=SUBMITTAL_KINDS,
+                               next_no=tr.next_number("submittals", "SUB"),
                                today=date.today().isoformat())
 
     @app.post("/p/<slug>/submittals")
@@ -577,7 +596,140 @@ def create_app(workspace: str | Path) -> Flask:
         flash("Project info saved.", "ok")
         return redirect(url_for("info", slug=slug))
 
+    # ------------------------------------------------------------ codes & assumptions
+    @app.get("/p/<slug>/codes")
+    def codes(slug):
+        ws = ws_for(slug)
+        latest = ws.store.latest()
+        working = read_basis_raw(ws.project)
+        basis = parse_basis(working, ws.rules)
+        issued = parse_basis(latest.basis, ws.rules) if latest else None
+        cites = codes_cited(ws, latest, working) if latest else []
+        fams = list(dict.fromkeys(list(CODE_EDITIONS) + [c.family for c in cites]))
+        rows = []
+        for fam in fams:
+            fc = [c for c in cites if c.family == fam]
+            if not fc and fam not in basis.codes:
+                continue
+            editions = list(dict.fromkeys(CODE_EDITIONS.get(fam, []) + [c.edition for c in fc]))
+            rows.append({"family": fam, "adopted": basis.codes.get(fam), "issued": issued.codes.get(fam) if issued else None,
+                         "editions": editions, "cites": fc,
+                         "stale": sum(len(c.locations) for c in fc if c.status == "different edition")})
+        changed = request.args.get("changed")
+        impact = None
+        if changed:
+            r = next((x for x in rows if x["family"] == changed), None)
+            if r:
+                impact = {"family": changed, "row": r,
+                          "docs": [(k, t, pg, c.label) for c in r["cites"] if c.status == "different edition"
+                                   for k, t, pg in c.locations]}
+        return render_template("codes.html", tab="codes", rows=rows, latest=latest, impact=impact,
+                               changed=changed, label=code_label,
+                               assumptions=list_assumptions(ws, latest, working),
+                               basis_assumptions=working.get("assumptions") or [],
+                               changes={c["auto_key"]: c for c in Tracker(ws.store).changes() if c["auto_key"]})
+
+    @app.post("/p/<slug>/codes")
+    def codes_save(slug):
+        ws = ws_for(slug)
+        import yaml
+        fam, ed = request.form.get("family", ""), request.form.get("edition", "")
+        raw = read_basis_raw(ws.project)
+        current = parse_basis(raw, ws.rules).codes
+        old = current.get(fam)
+        if fam not in CODE_EDITIONS and fam not in current:
+            flash("Unknown code.", "error")
+            return redirect(url_for("codes", slug=slug))
+        kept = [c for c in (raw.get("codes") or []) if not _is_family(c, fam, ws.rules)]
+        if ed and ed != "none":
+            kept.append(code_label(fam, ed))
+        raw["codes"] = kept
+        ws.project.basis_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True))
+        new_ed = ed if ed and ed != "none" else None
+        if new_ed != old:
+            res = record_code_change(ws, fam, old, new_ed)
+            n = len(res["affected"])
+            Tracker(ws.store).log("code", fam, f"{fam} adopted edition: {code_label(fam, old) if old else 'none'} → "
+                                              f"{code_label(fam, new_ed) if new_ed else 'none'}")
+            flash(f"{fam} is now {code_label(fam, new_ed) if new_ed else 'not adopted'}. "
+                  + (f"{n} document(s) cite {fam} and are listed in the change register." if res["change"]
+                     else "Matches the latest issue — no change needed."), "ok")
+        return redirect(url_for("codes", slug=slug, changed=fam) + f"#code-{_anchor(fam)}")
+
+    @app.post("/p/<slug>/assumptions")
+    def assumptions_save(slug):
+        ws = ws_for(slug)
+        import yaml
+        raw = read_basis_raw(ws.project)
+        raw["assumptions"] = [ln.strip() for ln in request.form.get("text", "").splitlines() if ln.strip()]
+        ws.project.basis_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True))
+        Tracker(ws.store).log("assumption", "basis", f"Project assumptions updated ({len(raw['assumptions'])})")
+        flash("Project assumptions saved. They print on the Codes & assumptions page of every book.", "ok")
+        return redirect(url_for("codes", slug=slug) + "#assumptions")
+
+    # ------------------------------------------------------------ engineering log
+    @app.get("/p/<slug>/log")
+    def log(slug):
+        ws = ws_for(slug)
+        cat = request.args.get("category") or None
+        q = request.args.get("q", "")
+        latest = ws.store.latest()
+        docs = ws.ordered_documents(latest) if latest else []
+        return render_template("log.html", tab="log", notes=Tracker(ws.store).notes(cat, q), cat=cat, q=q,
+                               categories=NOTE_CATEGORIES, docs=docs)
+
+    @app.post("/p/<slug>/log")
+    def log_add(slug):
+        ws = ws_for(slug)
+        f = request.form
+        try:
+            Tracker(ws.store).add_note(f.get("category", ""), f.get("author", ""), f.get("text", ""),
+                                       f.get("doc_key", ""), f.get("tags", ""))
+            flash("Logged.", "ok")
+        except ValueError as e:
+            flash(str(e), "error")
+        return redirect(url_for("log", slug=slug))
+
+    # ------------------------------------------------------------ change register
+    @app.get("/p/<slug>/changes-register")
+    def change_register(slug):
+        ws = ws_for(slug)
+        latest = ws.store.latest()
+        docs = ws.ordered_documents(latest) if latest else []
+        titles = {d.doc_key: d.title for d in docs}
+        chs = Tracker(ws.store).changes()
+        return render_template("change_register.html", tab="change_register", changes=chs, docs=docs,
+                               titles=titles, sources=CHANGE_SOURCES, latest=latest,
+                               open_items=sum(c["total"] - c["done"] for c in chs))
+
+    @app.post("/p/<slug>/changes-register")
+    def change_register_save(slug):
+        ws = ws_for(slug)
+        f = request.form
+        tr = Tracker(ws.store)
+        try:
+            if f.get("action") == "resolve":
+                tr.resolve_item(int(f["id"]), f["doc_key"], f.get("note", ""), f.get("reopen") != "1")
+                flash("Updated.", "ok")
+            else:
+                tr.add_change(f.get("title", ""), f.get("description", ""), f.get("source", "Other"),
+                              f.getlist("doc_key"))
+                flash("Change opened. Each listed document resolves when it is revised in a later issue.", "ok")
+        except (KeyError, ValueError) as e:
+            flash(str(e), "error")
+        return redirect(url_for("change_register", slug=slug))
+
     return app
+
+
+def _anchor(s: str) -> str:
+    return "".join(ch if ch.isalnum() else "-" for ch in s.lower())
+
+
+def _is_family(text: str, fam: str, rules) -> bool:
+    from ..rules import parse_code_name
+    parsed = parse_code_name(str(text), rules)
+    return bool(parsed and parsed[0] == fam)
 
 
 def _next_label(label: str) -> str:
