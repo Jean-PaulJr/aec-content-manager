@@ -3,8 +3,8 @@
   "short_name": "BigDelta",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#14202e",
-  "theme_color": "#14202e",
+  "background_color": "#132b40",
+  "theme_color": "#132b40",
   "icons": [
     {
       "src": "/static/icon-192.png",

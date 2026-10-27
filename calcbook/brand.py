@@ -1,9 +1,9 @@
 """BigDelta name and logo.
 
-The mark is a delta (Δ) built like a truss: three steel-blue triangles around an
-orange inverted triangle. The outer triangle is the most stable structural
-form; the orange centre is the change, the "delta", that the app tracks. It
-mirrors the revision delta engineers draw on revised sheets.
+The mark is the team's BigDelta logo: a teal delta (Δ) outline, the revision
+triangle engineers draw on revised sheets and the most stable structural
+form, with a bronze node at its apex and a bronze bar inside it for the change
+being tracked. Colours are taken from the supplied logo.
 
 Every icon is generated from the same geometry by code (SVG, ICO, PNG) and
 written into the web app's static folder at start-up, so no image files need
@@ -16,36 +16,39 @@ import io
 from pathlib import Path
 
 APP_NAME = "BigDelta"
-TAGLINE = "Calc packages, revisions and design intent for structural engineers"
+TAGLINE = "Structural Workspace"
 
-NAVY = "#14202e"
-STEEL = "#3b82c4"
-ORANGE = "#f26a1b"
+NAVY = "#132b40"
+TEAL = "#3e8585"
+BRONZE = "#887355"
+SLATE = "#909ca6"
+STEEL = TEAL          # kept for older callers
+ORANGE = BRONZE
 
-# Geometry on a 64 x 64 grid
-OUTER = [(32, 7), (59, 55), (5, 55)]
-INNER = [(18.5, 31), (45.5, 31), (32, 55)]
-
-
-def _pts(points, s=1.0, dx=0.0, dy=0.0) -> str:
-    return " ".join(f"{x * s + dx:.2f},{y * s + dy:.2f}" for x, y in points)
+# Geometry on a 64 x 64 grid: a delta drawn as an outline (the structure), a
+# bronze node at its apex and a bronze bar inside (the change it tracks).
+APEX, LEFT, RIGHT = (32.0, 11.0), (9.0, 53.0), (55.0, 53.0)
+STROKE = 5.2
+DOT_R = 4.4
+BAR = (28.0, 39.0, 43.0, 44.5)    # x0, y0, x1, y1
 
 
 def logo_svg(size: int | None = None, background: bool = True) -> str:
-    """The mark as SVG. With background, it sits on a navy rounded square
-    (the app icon); without, it is the bare mark for use on light pages."""
+    """The mark as SVG; with background it is the navy app icon."""
     wh = f' width="{size}" height="{size}"' if size else ""
     bg = f'<rect width="64" height="64" rx="14" fill="{NAVY}"/>' if background else ""
-    gap = NAVY if background else "#ffffff"
+    pts = " ".join(f"{x},{y}" for x, y in (APEX, LEFT, RIGHT))
+    x0, y0, x1, y1 = BAR
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"{wh} role="img" aria-label="{APP_NAME}">'
             f"<title>{APP_NAME}</title>{bg}"
-            f'<polygon points="{_pts(OUTER)}" fill="{STEEL}" stroke="{STEEL}" stroke-width="2" stroke-linejoin="round"/>'
-            f'<polygon points="{_pts(INNER)}" fill="{ORANGE}" stroke="{gap}" stroke-width="3.2" stroke-linejoin="round"/>'
+            f'<polygon points="{pts}" fill="none" stroke="{TEAL}" stroke-width="{STROKE}" stroke-linejoin="round"/>'
+            f'<rect x="{x0}" y="{y0}" width="{x1 - x0}" height="{y1 - y0}" rx="1" fill="{BRONZE}"/>'
+            f'<circle cx="{APEX[0]}" cy="{APEX[1]}" r="{DOT_R}" fill="{BRONZE}"/>'
             "</svg>")
 
 
 def logo_png(size: int = 512, background: bool = True) -> bytes:
-    """Rasterise the mark with Pillow (4x supersampled for clean edges)."""
+    """Rasterise the mark with Pillow (4x supersampled)."""
     from PIL import Image, ImageDraw
     k = 4
     big = size * k
@@ -54,13 +57,15 @@ def logo_png(size: int = 512, background: bool = True) -> bytes:
     d = ImageDraw.Draw(img)
     if background:
         d.rounded_rectangle((0, 0, big - 1, big - 1), radius=int(14 * s), fill=NAVY)
-    d.polygon([(x * s, y * s) for x, y in OUTER], fill=STEEL)
-    gap = NAVY if background else (255, 255, 255, 255)
-    # a slightly larger inverted triangle in the gap colour gives the white/navy web lines
-    cx, cy = 32, (31 + 31 + 55) / 3
-    grow = [(cx + (x - cx) * 1.16, cy + (y - cy) * 1.16) for x, y in INNER]
-    d.polygon([(x * s, y * s) for x, y in grow], fill=gap)
-    d.polygon([(x * s, y * s) for x, y in INNER], fill=ORANGE)
+    pts = [(x * s, y * s) for x, y in (APEX, LEFT, RIGHT)]
+    w = int(STROKE * s)
+    d.line(pts + [pts[0]], fill=TEAL, width=w, joint="curve")
+    for x, y in pts:                                   # round the corners
+        d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=TEAL)
+    x0, y0, x1, y1 = BAR
+    d.rounded_rectangle((x0 * s, y0 * s, x1 * s, y1 * s), radius=int(1 * s), fill=BRONZE)
+    r = DOT_R * s
+    d.ellipse((APEX[0] * s - r, APEX[1] * s - r, APEX[0] * s + r, APEX[1] * s + r), fill=BRONZE)
     img = img.resize((size, size), Image.LANCZOS)
     out = io.BytesIO()
     img.save(out, "PNG")
@@ -96,7 +101,7 @@ ICON_FILES = ["favicon.svg", "logo-mark.svg", "icon-192.png", "icon-512.png", "a
 
 def draw_logo(c, x: float, y: float, size: float, background: bool = False) -> None:
     """Draw the mark on a ReportLab canvas with (x, y) the lower-left corner."""
-    from reportlab.lib.colors import HexColor, white
+    from reportlab.lib.colors import HexColor
     s = size / 64
 
     def pt(px, py):
@@ -105,21 +110,18 @@ def draw_logo(c, x: float, y: float, size: float, background: bool = False) -> N
     if background:
         c.setFillColor(HexColor(NAVY))
         c.roundRect(x, y, size, size, 14 * s, stroke=0, fill=1)
-    for pts, color in ((OUTER, HexColor(STEEL)),):
-        p = c.beginPath()
-        p.moveTo(*pt(*pts[0]))
-        for q in pts[1:]:
-            p.lineTo(*pt(*q))
-        p.close()
-        c.setFillColor(color)
-        c.drawPath(p, stroke=0, fill=1)
-    c.setStrokeColor(HexColor(NAVY) if background else white)
-    c.setLineWidth(3.2 * s)
+    c.setStrokeColor(HexColor(TEAL))
+    c.setLineWidth(STROKE * s)
     c.setLineJoin(1)
     p = c.beginPath()
-    p.moveTo(*pt(*INNER[0]))
-    for q in INNER[1:]:
-        p.lineTo(*pt(*q))
+    p.moveTo(*pt(*APEX))
+    p.lineTo(*pt(*LEFT))
+    p.lineTo(*pt(*RIGHT))
     p.close()
-    c.setFillColor(HexColor(ORANGE))
-    c.drawPath(p, stroke=1, fill=1)
+    c.drawPath(p, stroke=1, fill=0)
+    c.setFillColor(HexColor(BRONZE))
+    x0, y0, x1, y1 = BAR
+    bx, by = pt(x0, y1)
+    c.roundRect(bx, by, (x1 - x0) * s, (y1 - y0) * s, 1 * s, stroke=0, fill=1)
+    cx, cy = pt(*APEX)
+    c.circle(cx, cy, DOT_R * s, stroke=0, fill=1)

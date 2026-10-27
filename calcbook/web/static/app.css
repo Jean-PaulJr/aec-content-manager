@@ -1,19 +1,19 @@
 :root{
   --bg:#f5f6f8; --card:#fff; --ink:#1b2230; --muted:#677184; --rule:#e2e5eb; --soft:#f0f2f5;
-  --accent:#1f4e79; --accent-ink:#fff; --side:#14202e; --side-ink:#c9d3df; --side-muted:#7f8ea1;
+  --accent:#2d6c6d; --accent-ink:#fff; --side:#132b40; --side-ink:#c9d3df; --side-muted:#7f8ea1;
   --err:#b42318; --err-bg:#fdecea; --warn:#9a5b06; --warn-bg:#fdf3e1; --info:#1f5f99; --info-bg:#e8f1fa;
   --new:#1e7a46; --new-bg:#e6f4ea; --rem:#dc2626; --add:#2563eb; --cloud:#ea580c;
   --radius:10px; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --bg:#0f141b; --card:#171e27; --ink:#e5e9ef; --muted:#97a2b2; --rule:#28313d; --soft:#1d2530;
-  --accent:#7fb2e5; --accent-ink:#0f141b; --side:#0b1016; --err:#f97066; --err-bg:#3a1d1b;
+  --accent:#74c2c2; --accent-ink:#0f141b; --side:#0b1016; --err:#f97066; --err-bg:#3a1d1b;
   --warn:#f5b44a; --warn-bg:#3a2c14; --info:#7fb2e5; --info-bg:#18293c; --new:#5fcf8c; --new-bg:#16301f;
   color-scheme:dark;
 }}
 :root[data-theme=dark]{
   --bg:#0f141b; --card:#171e27; --ink:#e5e9ef; --muted:#97a2b2; --rule:#28313d; --soft:#1d2530;
-  --accent:#7fb2e5; --accent-ink:#0f141b; --side:#0b1016; --err:#f97066; --err-bg:#3a1d1b;
+  --accent:#74c2c2; --accent-ink:#0f141b; --side:#0b1016; --err:#f97066; --err-bg:#3a1d1b;
   --warn:#f5b44a; --warn-bg:#3a2c14; --info:#7fb2e5; --info-bg:#18293c; --new:#5fcf8c; --new-bg:#16301f;
   color-scheme:dark;
 }
@@ -30,7 +30,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   position:sticky;top:0;height:100vh;overflow:auto}
 .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;color:#fff;letter-spacing:.01em}
 .brand .mark{width:30px;height:30px;flex:none;display:block}.brand .mark svg{width:100%;height:100%;display:block}
-.brand .word{font-size:18px;font-weight:500;letter-spacing:-.01em}.brand .word b{font-weight:800;color:#f26a1b}
+.brand .word{display:flex;flex-direction:column;line-height:1.1}.brand .name{font-size:20px;font-weight:800;color:#c9d2da;letter-spacing:-.01em}.brand .tag{font-size:8.5px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:#6f8a99;margin-top:3px}
 .navgroup{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--side-muted);font-weight:600;padding:12px 10px 4px}
 .side label{font-size:11px;color:var(--side-muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
 .side select{width:100%;margin-top:6px;background:#1f2c3c;color:#fff;border:1px solid #2c3b4e;border-radius:8px;padding:7px 8px;font-size:13px}
