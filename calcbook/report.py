@@ -66,7 +66,6 @@ pre{margin:0;padding:12px 14px;background:var(--code);overflow:auto;max-height:4
 footer{margin-top:40px;color:var(--muted);font-size:12px}
 </style></head><body><div class="wrap">
 <header>
-  <div class="eyebrow">Calculation package review</div>
   <h1>{{ project.name }}</h1>
   <div class="meta">Project {{ project.number }}{% if project.client %} · {{ project.client }}{% endif %}
    · <b>Issue {{ issue.label }}</b> ({{ issue.issued_on }}){% if issue.note %} — {{ issue.note }}{% endif %}</div>

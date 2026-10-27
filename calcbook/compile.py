@@ -122,7 +122,7 @@ def _draw_cover(c, ws: Workspace, issue: Issue, entries: list[Entry], total: int
     c.line(M, y - 5, W - M, y - 5)
     pkg_rev = package_revisions(ws.store, issue)
     c.setFont("Helvetica", 9)
-    for pkg in p.packages:
+    for pkg in [q for q in p.packages if not q.is_drawings]:
         es = [e for e in entries if e.doc.package == pkg.id]
         y -= ROW
         c.setFillColor(INK)
@@ -332,8 +332,9 @@ def _stamp(page, left, center, right, delta=None, delta_color=DELTA) -> None:
 
 def compile_issue(ws: Workspace, issue: Issue, out_path: Path, mark_changes: bool = True) -> dict:
     prev = ws.store.previous(issue)
-    prev_docs = ws.store.documents_by_key(prev) if prev else {}
-    docs = ws.ordered_documents(issue)
+    calc = lambda d: not ws.project.is_drawing_package(d.package)  # noqa: E731
+    prev_docs = {k: d for k, d in (ws.store.documents_by_key(prev) if prev else {}).items() if calc(d)}
+    docs = [d for d in ws.ordered_documents(issue) if calc(d)]
     statuses = doc_statuses(prev_docs if prev else None, {d.doc_key: d for d in docs})
     removed = [d for k, d in prev_docs.items() if statuses.get(k) == REMOVED]
 

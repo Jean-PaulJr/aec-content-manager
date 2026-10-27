@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><div><h1>Settings</h1><div class="sub">Project details, sub-packages and the design basis. Use <span class="mono">kind: drawings</span> for drawing sets.</div></div></div>
+<form method="post">
+<div class="grid g2">
+  <div class="card pad"><h3>project.yaml</h3><p class="muted small">Name, number, packages (order = order in the calc book).</p>
+    <textarea name="project_text" rows="30" spellcheck="false">{{ project_text }}</textarea></div>
+  <div class="card pad"><h3>design_basis.yaml</h3><p class="muted small">check: equals | at_least | at_most · packages: [IDs] limits scope.</p>
+    <textarea name="basis_text" rows="30" spellcheck="false">{{ basis_text }}</textarea></div>
+</div>
+<div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary">Save settings</button></div>
+</form>
+<h2>Delete project</h2>
+<form class="card pad row" method="post" action="{{ url_for('delete_project', slug=g.slug) }}">
+  <span class="muted small">Deletes all uploads, issues and archived PDFs. Type <span class="mono">{{ g.slug }}</span> to confirm.</span>
+  <input type="text" name="confirm" size="28"><button class="btn danger">Delete project</button>
+</form>
+{% endblock %}

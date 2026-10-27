@@ -1,0 +1,9 @@
+{% macro issue_select(name, current, label, endpoint, keep={}) %}
+<form method="get" class="row" style="gap:6px">
+  {% for k, v in keep.items() %}{% if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+  <span class="muted small">{{ label }}</span>
+  <select class="in" name="{{ name }}" onchange="this.form.submit()">
+    {% for i in g.ws.store.issues()|reverse %}<option value="{{ i.label }}" {% if current and i.label == current.label %}selected{% endif %}>Issue {{ i.label }} · {{ i.issued_on }}</option>{% endfor %}
+  </select>
+</form>
+{% endmacro %}

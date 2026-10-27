@@ -8,6 +8,7 @@
     calcbook diff A B                 what changed between two issues
     calcbook report  [--issue B]      HTML report (findings + changes + register)
     calcbook history GRV/GRV-02...    revision history of one document
+    calcbook serve --workspace DIR    web app for many projects (upload, drawings tracker)
 """
 from __future__ import annotations
 
@@ -236,6 +237,14 @@ def cmd_history(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    from .web import create_app
+    app = create_app(args.workspace)
+    print(f"calcbook running at http://{args.host}:{args.port}  (workspace: {Path(args.workspace).resolve()})")
+    app.run(host=args.host, port=args.port, debug=False, threaded=True)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("-p", "--project", default="project.yaml", help="path to project.yaml")
@@ -288,6 +297,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("history", parents=[common], help="revision history of one document")
     s.add_argument("doc_key", help="e.g. GRV/GRV-02_Floor_Beams")
     s.set_defaults(fn=cmd_history)
+    s = sub.add_parser("serve", help="run the web app for all projects in a workspace folder")
+    s.add_argument("--workspace", default="projects", help="folder holding one sub-folder per project")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8000)
+    s.set_defaults(fn=cmd_serve)
     return ap
 
 

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><div><h1>Projects</h1><div class="sub">Each project keeps its own documents, issues and design basis.</div></div>
+  <form method="post" action="{{ url_for('demo') }}"><button class="btn">Load demo project</button></form>
+</div>
+{% if cards %}
+<div class="grid g3">
+{% for c in cards %}
+  {% if c.error %}
+  <div class="card pad"><b>{{ c.slug }}</b><div class="small" style="color:var(--err)">{{ c.error }}</div></div>
+  {% else %}
+  <a class="card pad pcard" href="{{ url_for('overview', slug=c.slug) }}">
+    <div class="num">{{ c.p.number or '—' }}</div>
+    <h3>{{ c.p.name }}</h3>
+    <div class="muted small">{{ c.p.client }}</div>
+    <div class="meta">
+      <span>{{ c.p.packages|length }} packages</span>
+      <span>{{ c.docs }} documents</span>
+      <span>{% if c.latest %}Issue {{ c.latest.label }} · {{ c.latest.issued_on }}{% else %}not issued yet{% endif %}</span>
+    </div>
+    {% if c.c %}<div class="row small">
+      <span class="pill error">{{ c.c.error }} errors</span><span class="pill warning">{{ c.c.warning }} warnings</span>
+    </div>{% endif %}
+  </a>
+  {% endif %}
+{% endfor %}
+</div>
+{% else %}
+<div class="card empty">No projects yet. Create one below, or load the demo to see how it works.</div>
+{% endif %}
+
+<h2>New project</h2>
+<form class="card pad" method="post" action="{{ url_for('create_project') }}">
+  <div class="grid g4">
+    <label class="field">Project name<input type="text" name="name" required placeholder="Pier 70 Parking Structure"></label>
+    <label class="field">Project number<input type="text" name="number" placeholder="2026-021"></label>
+    <label class="field">Client<input type="text" name="client"></label>
+    <label class="field">Engineer of record<input type="text" name="eor"></label>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <span class="muted small">Starts with Gravity, Lateral, Foundations and a Structural Drawings set — change them in Settings.</span>
+    <span class="spacer"></span><button class="btn primary">Create project</button>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top">
+  <div><h1>Upload documents</h1>
+    <div class="sub">Drop each sub-package's PDFs below. Uploading <span class="mono">GRV-02_RevB.pdf</span> replaces <span class="mono">GRV-02_RevA.pdf</span>. Nothing is recorded until you issue a revision.</div></div>
+</div>
+
+<form class="card pad" method="post" action="{{ url_for('make_issue', slug=g.slug) }}">
+  <div class="row" style="margin-bottom:10px"><h3>Record a new issue</h3>
+    <span class="muted small">{% if latest %}Since Issue {{ latest.label }}: {% endif %}
+      <span class="pill new">{{ pending.new }} new</span> <span class="pill modified">{{ pending.modified }} revised</span>
+      <span class="pill withdrawn">{{ pending.withdrawn }} withdrawn</span></span></div>
+  <div class="row">
+    <label class="field">Issue / revision<input type="text" name="label" value="{{ next_label }}" required size="6"></label>
+    <label class="field">Date<input type="date" name="date" value="{{ today }}"></label>
+    <label class="field" style="flex:1;min-width:220px">Description<input type="text" name="note" placeholder="e.g. Permit submittal"></label>
+    <button class="btn primary" style="align-self:flex-end">Issue revision</button>
+  </div>
+  <div class="muted small" style="margin-top:8px">Snapshots every package as it is now, archives the PDFs, and captures the current design basis.</div>
+</form>
+
+{% for pkg in g.ws.project.packages %}
+<div class="card" id="pkg-{{ pkg.id }}" style="margin-top:14px">
+  <div class="pkg-head"><span class="id">{{ pkg.id }}</span><b>{{ pkg.title }}</b>
+    <span class="kind">{{ 'drawings' if pkg.is_drawings else 'calcs' }}</span>
+    {% if pkg.responsible %}<span class="muted small">{{ pkg.responsible }}</span>{% endif %}
+    <span class="spacer"></span><span class="muted small">{{ files[pkg.id]|length }} file(s)</span></div>
+  <div class="pad">
+    <form class="upload" method="post" enctype="multipart/form-data" action="{{ url_for('upload', slug=g.slug) }}">
+      <input type="hidden" name="package" value="{{ pkg.id }}">
+      <label class="drop"><input type="file" name="files" accept="application/pdf,.pdf" multiple>
+        <b>Drop PDFs here</b> or click to choose — {{ 'drawing sheets are matched by sheet number' if pkg.is_drawings else 'one calculation per file' }}</label>
+    </form>
+  </div>
+  {% if files[pkg.id] %}
+  <div class="scroll"><table>
+    <thead><tr><th>File</th><th>Status</th><th>Size</th><th></th></tr></thead><tbody>
+    {% for f in files[pkg.id] %}<tr>
+      <td class="mono">{{ f.rel }}</td>
+      <td><span class="pill {{ f.status }}">{{ {'issued': 'in Issue ' ~ f.issued_rev, 'modified': 'revised', 'new': 'new'}[f.status] }}</span></td>
+      <td class="muted">{{ '%.0f'|format(f.size/1024) }} KB</td>
+      <td style="text-align:right"><form method="post" action="{{ url_for('remove_file', slug=g.slug) }}" onsubmit="return confirm('Remove {{ f.rel }}? It will be withdrawn in the next issue.')">
+        <input type="hidden" name="package" value="{{ pkg.id }}"><input type="hidden" name="rel" value="{{ f.rel }}">
+        <button class="btn sm danger">Remove</button></form></td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% if withdrawn %}
+<h2>Will be withdrawn in the next issue</h2>
+<div class="card scroll"><table><tbody>
+{% for d in withdrawn %}<tr><td class="mono">{{ d.doc_key }}</td><td>{{ d.title }}</td><td><span class="pill withdrawn">withdrawn</span></td></tr>{% endfor %}
+</tbody></table></div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('form.upload').forEach(function(form){
+  var drop=form.querySelector('.drop'), input=form.querySelector('input[type=file]');
+  function send(files){ if(!files.length) return;
+    var fd=new FormData(); fd.append('package', form.package.value);
+    for (var i=0;i<files.length;i++) fd.append('files', files[i]);
+    drop.innerHTML='<b>Uploading '+files.length+' file(s)…</b>';
+    fetch(form.action,{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
+      .then(function(){ location.hash='pkg-'+form.package.value; location.reload(); });
+  }
+  input.addEventListener('change', function(){ send(input.files); });
+  ['dragenter','dragover'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.add('over');});});
+  ['dragleave','drop'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.remove('over');});});
+  drop.addEventListener('drop', function(ev){ send(ev.dataTransfer.files); });
+});
+</script>
+{% endblock %}

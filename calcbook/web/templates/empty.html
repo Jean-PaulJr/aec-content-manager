@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h1>{{ g.ws.project.name }}</h1></div>
+<div class="card empty">{{ message or 'Nothing here yet — upload documents and record the first issue.' }}
+  <div style="margin-top:12px"><a class="btn primary" href="{{ url_for('documents', slug=g.slug) }}">Upload documents</a></div></div>
+{% endblock %}

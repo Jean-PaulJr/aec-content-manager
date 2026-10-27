@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><div><h1>Document register</h1><div class="sub">Every document across every issue.</div></div></div>
+<div class="card scroll"><table>
+<thead><tr><th>Package</th><th>Document</th>{% for i in reg_issues %}<th style="text-align:center">{{ i.label }}</th>{% endfor %}<th>Current rev</th></tr></thead><tbody>
+{% for r in rows %}<tr><td class="mono">{{ r.package }}</td><td>{{ r.title }}<div class="muted small mono">{{ r.doc_key }}</div></td>
+{% for cell in r.cells %}<td style="text-align:center">{% if cell %}<span class="pill {{ cell }}" title="{{ cell }}">{{ {'new':'●','revised':'▲','unchanged':'○','removed':'✕'}[cell] }}</span>{% endif %}</td>{% endfor %}
+<td class="mono">{{ 'withdrawn' if r.cells[-1] in ('', 'removed') else r.current_rev }}</td></tr>{% endfor %}
+</tbody></table></div>
+<p class="muted small">● new · ▲ revised · ○ unchanged · ✕ withdrawn</p>
+{% endblock %}

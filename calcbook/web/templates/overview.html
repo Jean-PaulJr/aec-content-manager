@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top">
+  <div><h1>{{ g.ws.project.name }}</h1>
+    <div class="sub">{% if g.ws.project.number %}{{ g.ws.project.number }} · {% endif %}{{ g.ws.project.client }}{% if g.ws.project.engineer_of_record %} · EOR {{ g.ws.project.engineer_of_record }}{% endif %}</div></div>
+  <div class="row">
+    <a class="btn" href="{{ url_for('documents', slug=g.slug) }}">Upload documents</a>
+    {% if latest %}<a class="btn primary" href="{{ url_for('download_book', slug=g.slug) }}">Download calc book (Issue {{ latest.label }})</a>{% endif %}
+  </div>
+</div>
+
+{% if not latest %}
+<div class="card empty">No issues yet. Upload each sub-package's PDFs, then record Issue A.
+  <div style="margin-top:12px"><a class="btn primary" href="{{ url_for('documents', slug=g.slug) }}">Upload documents</a></div></div>
+{% else %}
+<div class="grid g4">
+  <a class="card pad stat err" href="{{ url_for('findings', slug=g.slug) }}"><b>{{ c.error }}</b><span>errors in Issue {{ latest.label }}</span></a>
+  <a class="card pad stat warn" href="{{ url_for('findings', slug=g.slug) }}"><b>{{ c.warning }}</b><span>warnings</span></a>
+  <div class="card pad stat info"><b>{{ c.info }}</b><span>notes</span></div>
+  {% if diff %}<a class="card pad stat" href="{{ url_for('changes', slug=g.slug) }}"><b>{{ diff.summary.revised + diff.summary.new }}</b><span>documents changed since {{ diff.old.label }}</span></a>{% endif %}
+  <a class="card pad stat" href="{{ url_for('documents', slug=g.slug) }}"><b>{{ pending }}</b><span>uploads not yet issued</span></a>
+</div>
+
+<div class="grid g2" style="margin-top:14px">
+  <div class="card">
+    <div class="pad row"><h3>Top errors</h3><span class="spacer"></span><a class="small" href="{{ url_for('findings', slug=g.slug) }}">All findings →</a></div>
+    {% if top %}<table><tbody>
+    {% for f in top %}<tr><td><span class="pill error">{{ f.title }}</span><div style="margin-top:4px">{{ f.message }}</div>
+      <div class="muted small mono">{{ f.where }}</div></td></tr>{% endfor %}
+    </tbody></table>{% else %}<div class="empty">No errors in Issue {{ latest.label }}.</div>{% endif %}
+  </div>
+  <div class="card">
+    <div class="pad"><h3>Issues</h3></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Issue</th><th>Date</th><th>Description</th><th>Docs</th><th></th></tr></thead><tbody>
+      {% for iss, nd, np in issues %}<tr>
+        <td class="mono"><b>{{ iss.label }}</b></td><td class="mono date">{{ iss.issued_on }}</td><td>{{ iss.note }}</td>
+        <td class="muted">{{ nd }} · {{ np }} pp</td>
+        <td style="white-space:nowrap"><a class="btn sm" href="{{ url_for('download_book', slug=g.slug, issue=iss.label) }}">Calc book</a>
+          <a class="btn sm" href="{{ url_for('download_report', slug=g.slug, issue=iss.label) }}">Report</a></td></tr>{% endfor %}
+      </tbody></table></div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

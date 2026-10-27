@@ -9,7 +9,6 @@ from pypdf import PdfReader
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "examples"))
 
 from calcbook.checks import run_checks  # noqa: E402
 from calcbook.config import load_project  # noqa: E402
@@ -22,9 +21,9 @@ from calcbook.store import Store  # noqa: E402
 
 @pytest.fixture(scope="module")
 def demo(tmp_path_factory):
-    import build_demo
+    from calcbook.demo import build
     target = tmp_path_factory.mktemp("demo") / "proj"
-    build_demo.build(target)
+    build(target, quiet=True)
     project = load_project(target / "project.yaml")
     return Workspace(project, Store(project.root), load_rules(project.rules_path))
 
@@ -76,7 +75,9 @@ def test_compress_ranges():
 def test_revision_diff(demo):
     a, b = demo.store.resolve("A"), demo.store.resolve("B")
     d = compare(demo, a, b)
-    assert d.summary == {"new": 1, "revised": 3, "removed": 1, "unchanged": 5}
+    calcs = [c for c in d.changes if c.package != "DWG"]
+    assert {s: sum(c.status == s for c in calcs) for s in ("new", "revised", "removed", "unchanged")} == \
+        {"new": 1, "revised": 3, "removed": 1, "unchanged": 5}
     beams = next(c for c in d.changes if c.doc_key == "GRV/GRV-02_Floor_Beams")
     assert beams.changed_pages == [1, 3]           # page 2 only had title-block changes
     assert ("B-12", "W16X31", "W18X35") in beams.member_changes
@@ -94,6 +95,8 @@ def test_design_intent_checks(demo):
     assert ("stale-reference", "CONN/CONN-01_Beam_Connections") in got
     assert ("dcr-exceeded", "GRV/GRV-03_Columns") in got
     assert any(f.check == "member-size-mismatch" and "B-12" in f.message for f in findings)
+    # drawing vs calc: S-201 shows B-14 W14X26, GRV designs W14X22
+    assert any(f.check == "member-size-mismatch" and "B-14" in f.message for f in findings)
     # FDN-01 cites "GRV Rev B", which is current — must not be flagged
     assert ("stale-reference", "FDN/FDN-01_Spread_Footings") not in got
 
@@ -106,3 +109,42 @@ def test_compiled_book(demo):
     assert titles[:3] == ["Cover", "Contents", "Revision summary"]
     assert "Sheet 14 of 14" in r.pages[-1].extract_text()
     assert "REVISED" in r.pages[4].extract_text()      # GRV-02 sheet 1 carries a delta tag
+
+
+def test_drawing_changes(demo):
+    from calcbook import drawings as dwg
+    diffs = {d.sheet_id: d for d in dwg.compare_sets(demo, demo.store.resolve("A"), demo.store.resolve("B"))}
+    assert set(diffs) == {"S-001", "S-101", "S-201"}          # matched across re-organised files
+    s201 = diffs["S-201"]
+    assert s201.status == "changed" and s201.new.title == "LEVEL 2 FRAMING"
+    assert "W16X31" in s201.words_removed and "W18X35" in s201.words_added
+    assert len(s201.regions) >= 3                               # label, new beam, deleted column (+ title block)
+    assert dwg.diff_image(demo, s201.key, "overlay") is not None
+    assert "92" in diffs["S-001"].words_removed and "95" in diffs["S-001"].words_added
+
+
+def test_web_app(tmp_path):
+    from calcbook.demo import calc_pdf
+    from calcbook.web import create_app
+    app = create_app(tmp_path / "ws")
+    c = app.test_client()
+    assert c.get("/").status_code == 200
+    r = c.post("/projects", data={"name": "Pier 70 Garage", "number": "2026-021"})
+    assert r.status_code == 302
+    slug = "pier-70-garage"
+    pdf = tmp_path / "GRV-01_Criteria_RevA.pdf"
+    calc_pdf(pdf, "GRV-01", "Criteria", "me", "A", [["LL = 40 psf", "f'c = 5000 psi"]])
+    r = c.post(f"/p/{slug}/upload", data={"package": "GRV", "files": (open(pdf, "rb"), pdf.name)},
+               content_type="multipart/form-data")
+    assert r.status_code == 302
+    r = c.post(f"/p/{slug}/upload", data={"package": "GRV", "files": (b"not a pdf", "x.pdf")},
+               content_type="multipart/form-data")
+    assert r.status_code == 302                                  # rejected with a flash, no crash
+    assert c.post(f"/p/{slug}/issue", data={"label": "A", "note": "first"}).status_code == 302
+    for page in ("", "/documents", "/findings", "/changes", "/drawings", "/register", "/settings"):
+        assert c.get(f"/p/{slug}{page}").status_code == 200, page
+    assert c.get(f"/p/{slug}/download/book").status_code == 200
+    assert c.get("/p/nope/findings").status_code == 404
+    # two projects side by side
+    c.post("/projects", data={"name": "Second Job"})
+    assert b"Second Job" in c.get("/").data and b"Pier 70 Garage" in c.get("/").data

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_macros.html" import issue_select %}
+{% block content %}
+<div class="top">
+  <div><h1>Design intent</h1><div class="sub">Every document in Issue {{ issue.label }} cross-checked against the design basis and against each other — calcs and drawing notes alike.</div></div>
+  <div class="row">{{ issue_select('issue', issue, 'Issue', 'findings') }}
+    <a class="btn" href="{{ url_for('download_findings', slug=g.slug, issue=issue.label) }}">CSV</a></div>
+</div>
+<div class="grid g4" style="margin-bottom:14px">
+  <div class="card pad stat err"><b>{{ c.error }}</b><span>errors</span></div>
+  <div class="card pad stat warn"><b>{{ c.warning }}</b><span>warnings</span></div>
+  <div class="card pad stat info"><b>{{ c.info }}</b><span>notes</span></div>
+</div>
+{% if findings %}
+<div class="row" style="margin-bottom:10px">
+  <div class="tabs" id="sev">
+    <button data-f="all" aria-pressed="true">All</button><button data-f="error" aria-pressed="false">Errors</button>
+    <button data-f="warning" aria-pressed="false">Warnings</button><button data-f="info" aria-pressed="false">Notes</button></div>
+  <input type="search" id="q" placeholder="Filter by document, member, value…" style="flex:1;min-width:200px">
+</div>
+<div class="card scroll"><table id="ft">
+<thead><tr><th>ID</th><th>Severity</th><th>Finding</th><th>Where</th><th>Expected</th><th>Found</th></tr></thead><tbody>
+{% for f in findings %}<tr data-sev="{{ f.severity }}">
+  <td class="mono" style="white-space:nowrap">{{ f.id }}</td>
+  <td><span class="pill {{ f.severity }}">{{ f.severity }}</span></td>
+  <td><b>{{ f.title }}</b><div>{{ f.message }}</div>{% if f.evidence %}<div class="ev">“{{ f.evidence }}”</div>{% endif %}</td>
+  <td class="muted small">{% if f.locations %}{% for l in f.locations %}{{ l }}<br>{% endfor %}{% else %}{{ f.where }}{% endif %}</td>
+  <td class="mono">{{ f.expected }}</td><td class="mono">{{ f.found }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% else %}<div class="card empty">No findings — every document agrees with the design basis.</div>{% endif %}
+
+<h2>Design basis for Issue {{ issue.label }}</h2>
+<div class="grid g2">
+<div class="card scroll"><table><thead><tr><th>Parameter</th><th>Requirement</th><th>Scope</th></tr></thead><tbody>
+{% for p in basis.params.values() %}<tr><td>{{ p.label }}{% if p.note %}<div class="muted small">{{ p.note }}</div>{% endif %}</td>
+<td class="mono">{{ p.display }}</td><td class="muted small">{{ p.packages|join(', ') or 'all' }}</td></tr>{% endfor %}
+</tbody></table></div>
+<div class="card scroll"><table><thead><tr><th>Adopted code</th><th>Edition</th></tr></thead><tbody>
+{% for fam, ed in basis.codes.items() %}<tr><td>{{ fam }}</td><td class="mono">{{ ed }}</td></tr>{% endfor %}
+<tr><td>Demand / capacity limit</td><td class="mono">{{ '%.2f'|format(basis.dcr_limit) }}</td></tr></tbody></table></div>
+</div>
+<p class="muted small" style="margin-top:14px">Edit the design basis in Settings. Findings point a reviewer to places to look; they don't replace engineering review.</p>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){var rows=[].slice.call(document.querySelectorAll('#ft tbody tr')),sev='all',q=document.getElementById('q');
+ function apply(){var t=(q&&q.value||'').toLowerCase();rows.forEach(function(r){r.style.display=((sev==='all'||r.dataset.sev===sev)&&(!t||r.textContent.toLowerCase().indexOf(t)>-1))?'':'none';});}
+ document.querySelectorAll('#sev button').forEach(function(b){b.onclick=function(){sev=b.dataset.f;document.querySelectorAll('#sev button').forEach(function(x){x.setAttribute('aria-pressed',x===b);});apply();};});
+ if(q)q.oninput=apply;})();
+</script>
+{% endblock %}

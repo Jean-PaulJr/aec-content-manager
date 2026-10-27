@@ -137,6 +137,9 @@ DEFAULT_SHAPE = (
     r"|L\d{1,2}(?:\.\d+)?\s*[xX×]\s*\d{1,2}(?:\.\d+)?\s*[xX×]\s*(?:\d+/\d+|\d*\.\d+))"
 )
 
+# Drawing sheet numbers: S-201, S2.01, S201, S-001, SK-3, A-101 (not member marks like C-3).
+DEFAULT_SHEET = r"^(?:(?:S|SD|A|C|M|E|P|G|L|FP)[-.]?\d\.?\d{2}|SK-?\d{1,3})[A-Z]?$"
+
 DEFAULT_DCR = [
     r"\b(?:DCR|D\s*/\s*C(?:\s*ratio)?|Unity(?:\s+(?:check|ratio))?|Interaction(?:\s+(?:ratio|value))?"
     r"|Utili[sz]ation(?:\s+ratio)?)\s*[=:]\s*{num}(?![\d.,])",
@@ -162,6 +165,7 @@ class RuleSet:
     dcr: list[re.Pattern]
     mark: re.Pattern
     shape: re.Pattern
+    sheet: re.Pattern = field(default_factory=lambda: re.compile(DEFAULT_SHEET))
 
     def label(self, key: str) -> str:
         r = self.params.get(key)
@@ -188,7 +192,7 @@ def load_rules(path: Path | None = None) -> RuleSet:
     params_spec = {k: dict(v) for k, v in DEFAULT_PARAMETERS.items()}
     codes_spec = {k: list(v) for k, v in DEFAULT_CODES.items()}
     dcr_spec = list(DEFAULT_DCR)
-    mark_spec, shape_spec = DEFAULT_MARK, DEFAULT_SHAPE
+    mark_spec, shape_spec, sheet_spec = DEFAULT_MARK, DEFAULT_SHAPE, DEFAULT_SHEET
 
     if path:
         user = yaml.safe_load(Path(path).read_text()) or {}
@@ -204,6 +208,7 @@ def load_rules(path: Path | None = None) -> RuleSet:
             dcr_spec = list(user["dcr_patterns"])
         mark_spec = user.get("mark_pattern", mark_spec)
         shape_spec = user.get("shape_pattern", shape_spec)
+        sheet_spec = user.get("sheet_pattern", sheet_spec)
 
     return RuleSet(
         params={k: _param_rule(k, v) for k, v in params_spec.items()},
@@ -211,6 +216,7 @@ def load_rules(path: Path | None = None) -> RuleSet:
         dcr=[_compile(p) for p in dcr_spec],
         mark=re.compile(mark_spec),
         shape=re.compile(shape_spec),
+        sheet=re.compile(sheet_spec),
     )
 
 

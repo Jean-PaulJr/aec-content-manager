@@ -4,16 +4,35 @@ A Python tool for structural engineers that
 
 1. **compiles** calculations from multiple sub-packages (gravity, lateral, foundations, connections, delegated design…) into one bookmarked calculation book,
 2. **tracks revisions** of every document across issues and shows exactly what changed — documents, pages, design values, member sizes, D/C ratios, and the design basis itself,
-3. **cross-checks** every document against a single design basis, and against each other, to confirm design intent is being followed.
+3. **tracks drawing changes visually** — sheets are matched by sheet number and overlaid, with changed areas clouded,
+4. **cross-checks** every calc and drawing against a single design basis, and against each other, to confirm design intent is being followed.
+
+It handles many projects at once, through a local web app or the command line.
 
 ## Install
 
 ```bash
-pip install -e .            # Python 3.10+; installs pypdf, pdfplumber, reportlab, PyYAML, Jinja2
-python examples/build_demo.py demo_project   # builds a 4-package demo with Issues A and B
+pip install -e .            # Python 3.10+
+calcbook serve --workspace projects          # web app at http://127.0.0.1:8000
 ```
 
-## Workflow
+Click **Load demo project** on the home page to see a project with two issues, four calc packages and a drawing set.
+
+## Web app
+
+| Page | What it does |
+|---|---|
+| Projects | All projects in the workspace folder; create a new one. Switch projects from the sidebar. |
+| Upload documents | Drag-and-drop PDFs into each sub-package. Uploading `GRV-02_RevB.pdf` replaces `GRV-02_RevA.pdf`. Files are marked new / revised / in issue, and **Issue revision** records the snapshot. |
+| Design intent | All findings for an issue, filterable, with the design basis in force. CSV export. |
+| Calc changes | Documents, pages, design values, member sizes and D/C changes between any two issues, with text diffs. |
+| Drawing changes | Every sheet with a clouded change thumbnail. The sheet viewer has **Overlay** (red removed, blue added), **Swipe**, **Side by side** and single-issue views, zoom/pan, a list of changed areas (click or use arrow keys to jump) and the text that changed (e.g. `W16X31 → W18X35`). |
+| Register | Every document across every issue. |
+| Settings | Edit `project.yaml` (packages) and `design_basis.yaml` in the browser. |
+
+Everything runs locally; uploaded files stay in the workspace folder on your computer.
+
+## Command line
 
 ```bash
 calcbook init my_job && cd my_job       # project.yaml + design_basis.yaml + package folders
@@ -26,14 +45,16 @@ calcbook check                          # design-intent findings (exit code 1 on
 calcbook compile                        # output/<job>_Calculations_Issue-B.pdf
 calcbook report                         # output/report_Issue-B.html
 calcbook history GRV/GRV-02_Floor_Beams
+calcbook serve --workspace projects     # web app over every project folder in `projects/`
+python -m calcbook.demo demo_project    # build the demo project on disk
 ```
 
 `-p path/to/project.yaml` works with every command.
 
 ## Files
 
-**project.yaml** — project info and the ordered list of sub-packages (`id`, `title`, `path`, `responsible`).
-Package order is the order in the compiled book.
+**project.yaml** — project info and the ordered list of sub-packages (`id`, `title`, `path`, `responsible`, `kind`).
+Package order is the order in the compiled book. `kind: drawings` marks a drawing set: it is excluded from the calc book, tracked sheet by sheet, and its notes are still cross-checked (so `B-14 W14X26` on S-201 is caught against `B-14 W14X22` in the calc).
 
 **design_basis.yaml** — the statement of design intent:
 
@@ -72,6 +93,13 @@ Findings go to the console, `output/findings_<issue>.csv/.json`, and the HTML re
 * Changed pages are found by text, ignoring title-block noise ("Rev B", "Sheet 2 of 5"), so a re-issued 40-page calc with one edited page shows one changed page.
 * The compiled book has a cover with issue history and package revisions, contents, a revision summary listing changed sheets, a footer on every sheet (`Issue B · Sheet n of N`), and a red **REVISED** / green **NEW** tag on changed sheets.
 
+## Drawing change detection
+
+* Sheet numbers (S-201, S2.01, S-001, A-101…) are read from the title block — the largest matching text toward the bottom-right — so sheets match even when a set is split or re-ordered across files. Override with `sheet_pattern` in the rules file.
+* Each pair of sheets is rendered at 150 dpi and compared pixel by pixel with a 1 px tolerance; changed pixels are grouped into regions (clouds).
+* Words are compared too, located on the sheet, so small text edits that barely change pixels (`W16X31 → W18X35`) are still clouded and listed. Words that only moved are ignored.
+* Renders and comparisons are cached in `.calcbook/`.
+
 ## Custom rules
 
 Add `rules: rules.yaml` to project.yaml to add or override extraction patterns (`{num}` = a number):
@@ -100,5 +128,7 @@ Checks work on the PDF text layer — scanned calcs need OCR first (they are fla
 ```
 calcbook/  config.py  store.py  ingest.py  extract.py  rules.py  units.py
            history.py diff.py   checks.py  compile.py  report.py cli.py
+           drawings.py (visual compare)  projects.py (multi-project, uploads)  demo.py
+           web/ (Flask app: templates/, static/)
 examples/build_demo.py      tests/test_calcbook.py
 ```

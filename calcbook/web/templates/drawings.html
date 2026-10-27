@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_macros.html" import issue_select %}
+{% block content %}
+<div class="top">
+  <div><h1>Drawing changes</h1><div class="sub">Sheets matched by sheet number and compared visually. Changed areas are clouded.</div></div>
+  {% if old %}<div class="row">{{ issue_select('old', old, 'From', 'drawings', {'new': new.label}) }}{{ issue_select('new', new, 'to', 'drawings', {'old': old.label}) }}</div>{% endif %}
+</div>
+{% if not old %}
+<div class="card pad" style="margin-bottom:14px">Issue {{ new.label }} is the first issue, so there is nothing to compare yet. Its {{ first|length }} sheet(s) are below.</div>
+<div class="sheets">{% for r in first %}
+  <div class="card sheet"><div class="thumb"><img loading="lazy" src="{{ url_for('page_image', slug=g.slug, doc_id=r.doc.id, page=r.page) }}"></div>
+  <div class="cap"><span class="sid">{{ r.sheet_id }}</span><span class="muted small">{{ r.title }}</span></div></div>{% endfor %}</div>
+{% else %}
+<div class="row" style="margin-bottom:14px">
+  <span class="pill changed">{{ c.changed }} changed</span><span class="pill new">{{ c.new }} new</span>
+  <span class="pill removed">{{ c.removed }} removed</span><span class="pill unchanged">{{ c.unchanged }} unchanged</span>
+  <span class="spacer"></span>
+  <div class="legend"><span><i class="sw" style="background:var(--rem)"></i>removed in {{ new.label }}</span>
+    <span><i class="sw" style="background:var(--add)"></i>added in {{ new.label }}</span>
+    <span><i class="sw" style="border:2px solid var(--cloud)"></i>change cloud</span></div>
+</div>
+<div class="sheets">
+{% for d in diffs %}{% set ref = d.new or d.old %}
+<a class="card sheet" href="{{ url_for('sheet', slug=g.slug, id=d.sheet_id, old=old.label, new=new.label) }}">
+  <div class="thumb">
+    {% if d.status == 'changed' %}<img loading="lazy" src="{{ url_for('diff_image', slug=g.slug, key=d.key, kind='thumb') }}">
+    {% else %}<img loading="lazy" src="{{ url_for('page_image', slug=g.slug, doc_id=ref.doc.id, page=ref.page) }}" style="{{ 'opacity:.45' if d.status == 'removed' }}">{% endif %}
+  </div>
+  <div class="cap">
+    <div class="row" style="gap:8px"><span class="sid">{{ d.sheet_id }}</span><span class="spacer"></span><span class="pill {{ d.status }}">{{ d.status }}</span></div>
+    <span class="muted small">{{ ref.title }}</span>
+    {% if d.status == 'changed' %}<span class="small">{{ d.regions|length }} area(s) changed{% if d.words_added or d.words_removed %} · <span class="mono">{{ (d.words_removed[:2] + d.words_added[:2])|join(' ') }}…</span>{% endif %}</span>{% endif %}
+  </div>
+</a>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

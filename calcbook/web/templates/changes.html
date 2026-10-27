@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_macros.html" import issue_select %}
+{% block content %}
+<div class="top">
+  <div><h1>Calculation changes</h1><div class="sub">What changed in the calculation packages between two issues. Drawing changes are under Drawing changes.</div></div>
+  <div class="row">{{ issue_select('old', old, 'From', 'changes', {'new': new.label}) }}{{ issue_select('new', new, 'to', 'changes', {'old': old.label}) }}</div>
+</div>
+{% if d.basis_changes %}
+<h2 style="margin-top:0">Design basis</h2>
+<div class="card scroll"><table><thead><tr><th>Item</th><th>Issue {{ old.label }}</th><th>Issue {{ new.label }}</th></tr></thead><tbody>
+{% for l, a, b in d.basis_changes %}<tr><td>{{ l }}</td><td class="mono">{{ a }}</td><td class="mono">{{ b }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% endif %}
+<h2>Documents</h2>
+<div class="card scroll"><table>
+<thead><tr><th>Status</th><th>Document</th><th>Changed pages</th><th>Design values</th><th>Members</th><th>Max D/C</th></tr></thead><tbody>
+{% for ch in changes %}<tr>
+<td><span class="pill {{ ch.status }}">{{ ch.status }}</span></td>
+<td><b>{{ ch.title }}</b><div class="muted small mono">{{ ch.doc_key }}</div></td>
+<td class="mono">{{ ranges(ch.changed_pages) or ('—' if ch.status != 'revised' else 'title block only') }}</td>
+<td>{% for l, a, b in ch.param_changes %}<div>{{ l }}: <span class="mono">{{ a }} → {{ b }}</span></div>{% else %}<span class="muted">—</span>{% endfor %}</td>
+<td>{% for m, a, b in ch.member_changes %}<div class="mono">{{ m }}: {{ a }} → {{ b }}</div>{% else %}<span class="muted">—</span>{% endfor %}</td>
+<td class="mono">{% set a, b = ch.max_dcr %}{{ '—' if a is none else '%.2f'|format(a) }} → {{ '—' if b is none else '%.2f'|format(b) }}</td>
+</tr>{% else %}<tr><td colspan="6" class="empty">No calculation changed.</td></tr>{% endfor %}
+</tbody></table></div>
+{% set diffs = changes|selectattr('text_diff')|list %}
+{% if diffs %}<h2>Text differences</h2>
+<div class="card">{% for ch in diffs %}<details><summary>{{ ch.title }} <span class="muted small mono">{{ ch.doc_key }}</span></summary>
+<pre class="diff mono">{% for line in ch.text_diff.splitlines() %}{% if line.startswith('+') and not line.startswith('+++') %}<span class="add">{{ line }}</span>{% elif line.startswith('-') and not line.startswith('---') %}<span class="del">{{ line }}</span>{% elif line.startswith('@@') %}<span class="hunk">{{ line }}</span>{% else %}{{ line }}{% endif %}
+{% endfor %}</pre></details>{% endfor %}</div>{% endif %}
+{% endblock %}

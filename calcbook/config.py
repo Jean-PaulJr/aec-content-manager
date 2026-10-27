@@ -17,6 +17,11 @@ class Package:
     path: Path
     discipline: str = ""
     responsible: str = ""
+    kind: str = "calcs"            # "calcs" | "drawings"
+
+    @property
+    def is_drawings(self) -> bool:
+        return self.kind == "drawings"
 
 
 @dataclass
@@ -34,6 +39,14 @@ class Project:
     @property
     def package_ids(self) -> list[str]:
         return [p.id for p in self.packages]
+
+    @property
+    def path(self) -> Path:
+        return self.root / "project.yaml"
+
+    def is_drawing_package(self, pid: str) -> bool:
+        p = self.package(pid)
+        return bool(p and p.is_drawings)
 
     def package(self, pid: str) -> Package | None:
         return next((p for p in self.packages if p.id == pid), None)
@@ -56,6 +69,7 @@ def load_project(path: str | Path) -> Project:
             path=(root / p["path"]).resolve(),
             discipline=p.get("discipline", ""),
             responsible=p.get("responsible", ""),
+            kind=str(p.get("kind", "calcs")).lower(),
         ))
     if len({p.id for p in pkgs}) != len(pkgs):
         raise ValueError("package ids must be unique")
